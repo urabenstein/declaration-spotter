@@ -4,6 +4,9 @@ use libxml::tree::Node;
 
 use spotter::DeclarationQuadruple;
 
+use std::io::stdout;
+use std::io::Write;
+
 // cse(//*[@id='S5.p2.1.m1.1.1'],//*[@id='    S5.p2.1.m1.1.1'],//*[@id='S5.p2.1.m1.1.1'])
 // <rdf:RDF xmlns:d="http://jfschaefer.de/declarations/KAnnSpec#"
 // xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"

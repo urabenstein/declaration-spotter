@@ -5,8 +5,10 @@ use senna::phrase::Phrase;
 use libxml::tree::Node;
 use libxml::xpath::Context;
 
-use std::io::stdout;
-use std::io::Write;
+// use std::io::stdout;
+// use std::io::Write;
+
+use mathanalyzer::*;
 
 
 pub struct DeclarationSpotter<'t> {
@@ -62,8 +64,6 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
     let xpath_context = Context::new(&document.dom).unwrap();
 
     for sentence in document.annotated_sentence_iter() {
-        println!("Sentence: {}", sentence.range.get_plaintext());
-        stdout().flush().unwrap();
         let matches = P::match_sentence(&sentence, &pattern);
         for match_ in &matches {
             let sentence_node = sentence.node.as_ref().unwrap();
@@ -106,4 +106,43 @@ pub fn naive_raw_to_quad(raw: &Vec<RawDeclaration>) -> Vec<DeclarationQuadruple>
 }
 
 
+fn get_math_child(word: Node) -> Option<Node> {
+    let child = word.get_first_child();
+    match child {
+        Some(c) => 
+            match &c.get_name() as &str {
+                "math" => Some(c),
+                _ => None,
+            },
+        None => None,
+    }
+}
+
+pub fn first_identifier_purifier(raw: &Vec<RawDeclaration>) -> Vec<DeclarationQuadruple> {
+    let mut result : Vec<DeclarationQuadruple> = Vec::new();
+
+    for r in raw {
+        let math_node_option = get_math_child(r.quadr.variable.clone());
+        if math_node_option.is_none() {
+            println!("Warning: Found mathformula, but not containing <math>...<math>");
+            continue;
+        }
+        let math_node = math_node_option.unwrap();
+        let identifiers = find_potential_identifiers(math_node);
+        for id in &identifiers {
+            if id.tags.contains(&IdentifierTags::First) {
+                result.push(DeclarationQuadruple {
+                    variable: id.node.clone(),
+                    restriction_start: r.quadr.restriction_start.clone(),
+                    restriction_end: r.quadr.restriction_end.clone(),
+                    sentence: r.quadr.sentence.clone(),
+                });
+                break;
+            }
+        }
+        println!("Didn't find first identifier");
+    }
+
+    result
+}
 
