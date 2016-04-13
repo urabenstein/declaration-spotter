@@ -17,8 +17,10 @@ pub struct DeclarationSpotter<'t> {
 
 
 #[derive(Clone)]
-pub struct DeclarationQuadruple {
-    pub variable: Node,
+pub struct Declaration {
+    pub mathnode: Node,
+    pub var_start: Node,
+    pub var_end: Node,
     pub restriction_start: Node,
     pub restriction_end: Node,
     pub sentence: Node,
@@ -26,7 +28,10 @@ pub struct DeclarationQuadruple {
 
 
 pub struct RawDeclaration {
-    pub quadr: DeclarationQuadruple,
+    pub mathnode: Node,
+    pub restriction_start: Node,
+    pub restriction_end: Node,
+    pub sentence: Node,
     pub definiens_notes : Vec<&'static str>,
     pub definiendum_notes : Vec<&'static str>,
 }
@@ -87,12 +92,10 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
             let r_start_node = xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]", sentence_id, restr_start+1)).unwrap().get_nodes_as_vec()[0].clone();
             let r_end_node = xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]", sentence_id, restr_end)).unwrap().get_nodes_as_vec()[0].clone();
             results.push(RawDeclaration {
-                quadr: DeclarationQuadruple {
-                    variable: variable_node,
-                    restriction_start: r_start_node,
-                    restriction_end: r_end_node,
-                    sentence: sentence_node.clone(),
-                },
+                mathnode: variable_node,
+                restriction_start: r_start_node,
+                restriction_end: r_end_node,
+                sentence: sentence_node.clone(),
                 definiens_notes : definiens_notes.unwrap(),
                 definiendum_notes : definiendum_notes.unwrap(),
             });
@@ -101,8 +104,15 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
     results
 }
 
-pub fn naive_raw_to_quad(raw: &Vec<RawDeclaration>) -> Vec<DeclarationQuadruple> {
-    raw.iter().map(|r| r.quadr.clone()).collect()
+pub fn naive_raw_to_quad(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
+    raw.iter().map(|r| Declaration {
+        mathnode: r.mathnode.clone(),
+        var_start: r.mathnode.clone(),
+        var_end: r.mathnode.clone(),
+        sentence: r.sentence.clone(),
+        restriction_start: r.restriction_start.clone(),
+        restriction_end: r.restriction_end.clone(),
+    }).collect()
 }
 
 
@@ -118,11 +128,11 @@ fn get_math_child(word: Node) -> Option<Node> {
     }
 }
 
-pub fn first_identifier_purifier(raw: &Vec<RawDeclaration>) -> Vec<DeclarationQuadruple> {
-    let mut result : Vec<DeclarationQuadruple> = Vec::new();
+pub fn first_identifier_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
+    let mut result : Vec<Declaration> = Vec::new();
 
     for r in raw {
-        let math_node_option = get_math_child(r.quadr.variable.clone());
+        let math_node_option = get_math_child(r.mathnode.clone());
         if math_node_option.is_none() {
             println!("Warning: Found mathformula, but not containing <math>...<math>");
             continue;
@@ -131,11 +141,13 @@ pub fn first_identifier_purifier(raw: &Vec<RawDeclaration>) -> Vec<DeclarationQu
         let identifiers = find_potential_identifiers(math_node);
         for id in &identifiers {
             if id.tags.contains(&IdentifierTags::First) {
-                result.push(DeclarationQuadruple {
-                    variable: id.node.clone(),
-                    restriction_start: r.quadr.restriction_start.clone(),
-                    restriction_end: r.quadr.restriction_end.clone(),
-                    sentence: r.quadr.sentence.clone(),
+                result.push(Declaration {
+                    mathnode: r.mathnode.clone(),
+                    var_start: id.start.clone(),
+                    var_end: id.end.clone(),
+                    restriction_start: r.restriction_start.clone(),
+                    restriction_end: r.restriction_end.clone(),
+                    sentence: r.sentence.clone(),
                 });
                 break;
             }

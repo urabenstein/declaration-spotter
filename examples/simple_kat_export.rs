@@ -2,18 +2,13 @@ extern crate llamapun;
 extern crate libxml;
 extern crate declarationspotter;
 
-// use std::io;
 use std::io::stdout;
 use std::io::Write;
 
-// use libxml::xpath::Context;
-// use libxml::tree::Document as XMLDocument;
 
 use llamapun::data::Corpus;
-// use llamapun::patterns::Pattern;
 
 use declarationspotter::spotter::*;
-// use declarationspotter::mathanalyzer::find_potential_identifiers;
 use declarationspotter::kat_export::*;
 
 pub fn main() {
@@ -62,7 +57,8 @@ pub fn main() {
         }
     } */
     let raw_declarations = get_declarations(&mut document, &pattern);
-    let pure_declarations = naive_raw_to_quad(&raw_declarations);
+    // let pure_declarations = naive_raw_to_quad(&raw_declarations);
+    let pure_declarations = first_identifier_purifier(&raw_declarations);
     println!("{}", kat_export(&pure_declarations));
     stdout().flush().unwrap();
 }

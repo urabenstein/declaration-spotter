@@ -11,7 +11,8 @@ pub enum IdentifierTags {
 
 #[derive(Clone)]
 pub struct Identifier {
-    pub node : Node,
+    pub start : Node,
+    pub end : Node,
     pub tags : Vec<IdentifierTags>,
 }
 
@@ -21,22 +22,22 @@ pub fn find_potential_identifiers(math_node : Node) -> Vec<Identifier> {
     let mut results : Vec <Identifier> = Vec::new();
 
     assert_eq!(math_node.get_name(), "math");
-    match get_first_identifier(math_node) {
-        Some(x) => results.push(Identifier { node: x, tags: vec![IdentifierTags::First] } ),
+    match get_first_identifier(math_node.clone()) {
+        Some(x) => results.push(Identifier { start: x.clone(), tags: vec![IdentifierTags::First], end: find_end_of_identifier(x.clone()) } ),
         None => { }
-    }
+    };
 
-    match get_first_identifier_seq(math_node, None) {
+    match get_first_identifier_seq(Some(math_node), None) {
         None => { }
-        Some(nodes, separator) => {
+        Some((mut nodes, separator)) => {
             if nodes.len() > 1 {  // sequence has to have at least two elements ;)
                 // check if \ldots was used:
                 let mut ellipsis: bool = false;
                 let mut pos = 0usize;
-                while pos < nodes.len() {
-                    if nodes[pos] == "\u{2026}" {
+                while pos < (&nodes).len() {
+                    if nodes[pos].get_content() == "\u{2026}" {
                         ellipsis = true;
-                        nodes.remove[pos];
+                        nodes.remove(pos);
                         // don#t break, possibly multiple ellipses
                     } else {
                         pos += 1;
@@ -48,14 +49,14 @@ pub fn find_potential_identifiers(math_node : Node) -> Vec<Identifier> {
                     if separator != "," && separator != "" {
                         tags.push(IdentifierTags::RelSeq);
                     }
-                    for n in nodes {
-                        results.push(Identifier { node: n, tags: tags.clone() });
-                    }
+                    //for n in &nodes {
+                    //     results.push(Identifier { node: n.clone(), tags: tags.clone() });
+                    // }
+                    results.push(Identifier { start: nodes[0].clone(), tags: tags.clone(), end: nodes[nodes.len()-1].clone() });
                 }
-
             }
         }
-    }
+    };
     
     results
 }
@@ -150,5 +151,29 @@ fn get_first_identifier_helper(root: Node) -> Option<Node> {
                 None
             },
     }
+}
+
+
+fn find_end_of_identifier(from: Node) -> Node {
+    let mut cur : Node = from.clone();
+    let mut last : Node = from.clone();
+    loop {
+        match cur.get_next_sibling() {
+            None => break,
+            Some(x) => cur = x,
+        }
+        match &cur.get_name() as &str {
+            "mi" => last = cur.clone(),
+            "msub" | "msup" | "msubsup" =>
+                if get_first_identifier_helper(cur.clone()).is_some() {
+                    last = cur.clone();
+                } else {
+                    break;
+                },
+            "mo" => if cur.get_content() != "" { break; },
+            _ => break,
+        }
+    }
+    return last;
 }
 
