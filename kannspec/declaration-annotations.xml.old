@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<annotation name="Declarations"
+    xmlns="https://github.com/KWARC/KAT/"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:d="http://jfschaefer.de/declarations/KAnnSpec#">
+    <documentation>
+        KAnnSpec for declarations, created for the evaluation of declaration spotters.
+    </documentation>
+    <concept name="Variable" rdftype="d:Variable">
+        <documentation>A variable that should be declared/restricted</documentation>
+        <field name="loremipsum" type="text" rdfpred="d:loremipsum">
+            <documentation>apparently, KAT requires me to have at least one field</documentation>
+            <value>LoremIpsum</value>
+            <default>siamet</default>
+        </field>
+        <display>
+            <template>
+                <b>Variable</b>
+            </template>
+        </display>
+    </concept>
+
+    <concept name="Declaration" rdftype="d:Declaration">
+        <field name="For" type="reference" rdfpred="d:declares">
+            <value>For</value>
+            <referencedType>Variable</referencedType>
+            <number atleast="1" atmost="10"/>
+        </field>
+        <field name="type" type="select" rdfpred="d:polarity">
+            <defaultoption rdfobj="d:unkownpolarity">
+                <value>unkown</value>
+                <documentation>we do not know, whether it is a universal or an existential declaration</documentation>
+            </defaultoption>
+            <option rdfobj="d:universal">
+                <documentation>it is a universal declaration</documentation>
+                <value>universal</value>
+            </option>
+            <option rdfobj="d:recursivedef">
+                <documentation>it is an existential declaration</documentation>
+                <value>existential</value>
+            </option>
+        </field>
+        <display>
+            <template>
+                <b>Declaration</b> of polarity {{=type[0]}}
+            </template>
+        </display>
+    </concept>
+</annotation>

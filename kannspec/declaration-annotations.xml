@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<annotation name="Declarations"
+    xmlns="https://github.com/KWARC/KAT/"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:d="http://jfschaefer.de/declarations/KAnnSpec#">
+    <documentation>
+        KAnnSpec for declarations, created for the evaluation of declaration spotters.
+    </documentation>
+    <concept name="Restriction" rdftype="d:Restriction">
+        <documentation>A restriction on identifiers</documentation>
+        <field name="type" type="select" rdfpred="d:restrictiontype">
+            <defaultoption rdfobj="d:generalrestriction">
+                <value>general</value>
+                <documentation>A general restriction</documentation>
+            </defaultoption>
+            <option rdfobj="d:definingrestriction">
+                <value>defining</value>
+                <documentation>A defining restriction</documentation>
+            </option>
+            <option rdfobj="d:existentialrestriction">
+                <value>existential</value>
+            </option>
+            <option rdfobj="d:universalrestriction">
+                <value>universal</value>
+            </option>
+        </field>
+        <display>
+            <template><b>Restriction</b> ({{=type[0]}})</template>
+        </display>
+    </concept>
+
+    <concept name="Identifier" rdftype="d:Identifier">
+        <documentation>An identifier that should be declared/restricted</documentation>
+        <field name="RestrictedBy" type="reference" rdfpred="d:restrictedby">
+            <value>RestrictedBy</value>
+            <referencedType>Restriction</referencedType>
+            <number atleast="1"/>
+        </field>
+        <field name="seqtype" type="select" rdfpred="d:identifierisseqtype">
+            <defaultoption rdfobj="d:identifierisntseq">
+                <value>nosequence</value>
+                <documentation>It is not a sequence</documentation>
+            </defaultoption>
+            <option rdfobj="d:identifierisseq_ell_nonrel">
+                <value>elliptic_nonrelated</value>
+                <documentation>An elliptic sequence of identifiers, not related, e.g. x1, x2, ..., xn</documentation>
+            </option>
+            <option rdfobj="d:identifierisseq_ell_rel">
+                <value>elliptic_related</value>
+                <documentation>An elliptic sequence of related identifiers, e.g. x1 &lt; x2 &lt; ... &lt; xn</documentation>
+            </option>
+        </field>
+        <display>
+            <template>
+                <b>Identifier</b> ({{=seqtype[0]}})
+            </template>
+        </display>
+    </concept>
+</annotation>

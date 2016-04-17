@@ -23,7 +23,9 @@ pub fn find_potential_identifiers(math_node : Node) -> Vec<Identifier> {
 
     assert_eq!(math_node.get_name(), "math");
     match get_first_identifier(math_node.clone()) {
-        Some(x) => results.push(Identifier { start: x.clone(), tags: vec![IdentifierTags::First], end: find_end_of_identifier(x.clone()) } ),
+        Some(x) => {
+            println!("found {}", math_node.get_all_content());
+            results.push(Identifier { start: x.clone(), tags: vec![IdentifierTags::First], end: find_end_of_identifier(x.clone()) } ); },
         None => { }
     };
 
@@ -35,7 +37,7 @@ pub fn find_potential_identifiers(math_node : Node) -> Vec<Identifier> {
                 let mut ellipsis: bool = false;
                 let mut pos = 0usize;
                 while pos < (&nodes).len() {
-                    if nodes[pos].get_content() == "\u{2026}" {
+                    if nodes[pos].get_all_content() == "\u{2026}" {
                         ellipsis = true;
                         nodes.remove(pos);
                         // don#t break, possibly multiple ellipses
@@ -86,8 +88,8 @@ fn get_first_identifier_seq(root_opt: Option<Node>, sep: Option<&str>) -> Option
                 None => None,
             },
         "mo" => 
-            match &root.get_content() as &str {
-                "(" | "" | /* "\u{2026}" /* \ldots */ | */ "\u{27E8}" /* \langle */ =>
+            match &root.get_all_content() as &str {
+                "(" | "" | "\u{2062}" /* invisible times */  | /* "\u{2026}" /* \ldots */ | */ "\u{27E8}" /* \langle */ =>
                     get_first_identifier_seq(root.get_next_sibling(), sep),
                 "=" => None,
                 x => match sep {
@@ -126,7 +128,7 @@ fn get_first_identifier(root: Node) -> Option<Node> {
         "msub" => get_first_identifier_helper(root),
         "msup" => get_first_identifier_helper(root),
         "msubsup" => get_first_identifier_helper(root),
-        "mo" => if root.get_content() == "(" {
+        "mo" => if root.get_all_content() == "(" {
             match root.get_next_sibling() {
                 None => None,
                 Some(x) => get_first_identifier(x),
@@ -163,14 +165,23 @@ fn find_end_of_identifier(from: Node) -> Node {
             Some(x) => cur = x,
         }
         match &cur.get_name() as &str {
-            "mi" => last = cur.clone(),
+            "mi" => { println!("Okay with '{}'", cur.get_all_content());  last = cur.clone(); },
             "msub" | "msup" | "msubsup" =>
                 if get_first_identifier_helper(cur.clone()).is_some() {
+                    println!("Okay with '{}'", cur.get_all_content());
                     last = cur.clone();
                 } else {
                     break;
                 },
-            "mo" => if cur.get_content() != "" { break; },
+            "mo" => match &cur.get_all_content() as &str {
+                "" | "\u{2062}" /* invisible times */ => continue,
+                _ => break,
+            },
+                
+                /* if cur.get_all_content() != "" { 
+                println!("Breaking with '{}'", cur.get_all_content()); // TODO: FIX - Breaks with seemingly ""
+                break; } else {
+                    println!("Continuing with '{}'", cur.get_all_content()); continue; }, */
             _ => break,
         }
     }
