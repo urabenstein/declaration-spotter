@@ -15,6 +15,14 @@ pub struct DeclarationSpotter<'t> {
     pattern: P<'t, &'t str, &'t str>,
 }
 
+#[derive(Clone, Copy)]
+pub enum IdentifierType {
+    nosequence,
+    elliptic_nonrelated,
+    elliptic_related,
+}
+
+
 
 #[derive(Clone)]
 pub struct Declaration {
@@ -24,6 +32,9 @@ pub struct Declaration {
     pub restriction_start: Node,
     pub restriction_end: Node,
     pub sentence: Node,
+
+    pub idtype: IdentifierType,
+    pub mathnode_is_restriction: bool
 }
 
 
@@ -34,6 +45,7 @@ pub struct RawDeclaration {
     pub sentence: Node,
     pub definiens_notes : Vec<&'static str>,
     pub definiendum_notes : Vec<&'static str>,
+    pub no_noun: bool,
 }
 
 
@@ -98,6 +110,7 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
                 sentence: sentence_node.clone(),
                 definiens_notes : definiens_notes.unwrap(),
                 definiendum_notes : definiendum_notes.unwrap(),
+                no_noun : restr_end <= restr_start,
             });
         }
     }
@@ -112,6 +125,8 @@ pub fn naive_raw_to_quad(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
         sentence: r.sentence.clone(),
         restriction_start: r.restriction_start.clone(),
         restriction_end: r.restriction_end.clone(),
+        idtype: IdentifierType::nosequence,
+        mathnode_is_restriction : false,
     }).collect()
 }
 
@@ -148,12 +163,103 @@ pub fn first_identifier_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> 
                     restriction_start: r.restriction_start.clone(),
                     restriction_end: r.restriction_end.clone(),
                     sentence: r.sentence.clone(),
+                    idtype: IdentifierType::nosequence,
+                    mathnode_is_restriction : false,
                 });
                 break;
             }
         }
         println!("Didn't find first identifier");
     }
+
+    result
+}
+
+pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
+    let mut result : Vec<Declaration> = Vec::new();
+
+    for r in raw {
+        let math_node_option = get_math_child(r.mathnode.clone());
+        if math_node_option.is_none() {
+            println!("Warning: Found mathformula, but not containing <math>...<math>");
+            continue;
+        }
+        let math_node = math_node_option.unwrap();
+        let identifiers = find_potential_identifiers(math_node.clone());
+
+        let mut first_identifier : Option<(Node, Node)> = None;
+        let mut is_rel_seq = false;
+        let mut is_ell_seq = false;
+        let mut seq_start : Option<Node> = None;
+        let mut seq_end : Option<Node> = None;
+        for id in &identifiers {
+            if id.tags.contains(&IdentifierTags::First) {
+                first_identifier = Some((id.start.clone(), id.end.clone()));
+            }
+            if id.tags.contains(&IdentifierTags::FirstSeq) {
+                if seq_start.is_none() {
+                    seq_start = Some(id.start.clone());
+                    if id.tags.contains(&IdentifierTags::RelSeq) {
+                        is_rel_seq = true;
+                    }
+                    if id.tags.contains(&IdentifierTags::Ellipsis) {
+                        is_ell_seq = true;
+                    }
+                }
+                seq_end = Some(id.end.clone());
+            }
+        }
+        let last_node = get_last_identifier(math_node.clone());
+
+
+        // OPTION 1: is_ell_seq
+        if is_ell_seq {
+            result.push(Declaration {
+                mathnode: r.mathnode.clone(),
+                var_start: seq_start.unwrap(),
+                var_end: seq_end.as_ref().unwrap().clone(),
+                restriction_start: if !r.no_noun { r.restriction_start.clone() } else { r.mathnode.clone() },
+                restriction_end: if !r.no_noun { r.restriction_end.clone() } else { r.mathnode.clone() },
+                sentence: r.sentence.clone(),
+                idtype: if is_rel_seq { IdentifierType::elliptic_related } else { IdentifierType::elliptic_nonrelated },
+                mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != seq_end.as_ref().unwrap(),
+            });
+
+        // OPTION 2: !is_rel_seq   (MISSING: is sequence, and plural restriction)
+        } else if !is_rel_seq {
+            for id in &identifiers {
+                result.push(Declaration {
+                    mathnode: r.mathnode.clone(),
+                    var_start: id.start.clone(),
+                    var_end: id.end.clone(),
+                    restriction_start: if !r.no_noun { r.restriction_start.clone() } else { r.mathnode.clone() },
+                    restriction_end: if !r.no_noun { r.restriction_end.clone() } else { r.mathnode.clone() },
+                    sentence: r.sentence.clone(),
+                    idtype: IdentifierType::nosequence,
+                    mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != &id.end,
+            });
+
+                if id.tags.contains(&IdentifierTags::FirstSeq) {
+
+                }
+            }
+
+        // OPTION 3: first_identifier.is_some()
+        } else if first_identifier.is_some() {
+            result.push(Declaration {
+                mathnode: r.mathnode.clone(),
+                var_start: first_identifier.as_ref().unwrap().0.clone(),
+                var_end: first_identifier.as_ref().unwrap().1.clone(),
+                restriction_start: if !r.no_noun { r.restriction_start.clone() } else { r.mathnode.clone() },
+                restriction_end: if !r.no_noun { r.restriction_end.clone() } else { r.mathnode.clone() },
+                sentence: r.sentence.clone(),
+                idtype: IdentifierType::nosequence,
+                mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != &first_identifier.unwrap().1,
+            });
+
+        }
+    }
+
 
     result
 }

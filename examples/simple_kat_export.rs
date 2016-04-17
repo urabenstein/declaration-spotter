@@ -58,7 +58,8 @@ pub fn main() {
     } */
     let raw_declarations = get_declarations(&mut document, &pattern);
     // let pure_declarations = naive_raw_to_quad(&raw_declarations);
-    let pure_declarations = first_identifier_purifier(&raw_declarations);
+    // let pure_declarations = first_identifier_purifier(&raw_declarations);
+    let pure_declarations = sequence_purifier(&raw_declarations);
     println!("{}", kat_export(&pure_declarations));
     stdout().flush().unwrap();
 }

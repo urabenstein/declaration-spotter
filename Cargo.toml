@@ -1,0 +1,17 @@
+[package]
+name = "declaration-spotter"
+version = "0.0.1"
+authors = ["jfschaefer <j.schaefer@jacobs-university.de>"]
+
+[lib]
+name = "declarationspotter"
+crate-type = ["rlib", "dylib", "staticlib"]
+
+[dependencies.libxml]
+git = "https://github.com/jfschaefer/rust-libxml.git"
+[dependencies.rust-senna]
+git = "https://github.com/jfschaefer/rust-senna.git"
+[dependencies.llamapun]
+git = "https://github.com/KWARC/llamapun.git"
+branch = "pattern_matcher"
+

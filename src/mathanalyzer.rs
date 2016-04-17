@@ -54,7 +54,13 @@ pub fn find_potential_identifiers(math_node : Node) -> Vec<Identifier> {
                     //for n in &nodes {
                     //     results.push(Identifier { node: n.clone(), tags: tags.clone() });
                     // }
-                    results.push(Identifier { start: nodes[0].clone(), tags: tags.clone(), end: nodes[nodes.len()-1].clone() });
+                    if ellipsis {
+                        results.push(Identifier { start: nodes[0].clone(), tags: tags.clone(), end: nodes[nodes.len()-1].clone() });
+                    } else {
+                        for n in &nodes {
+                            results.push( Identifier { start: n.clone(), tags: tags.clone(), end: n.clone() });
+                        }
+                    }
                 }
             }
         }
@@ -154,6 +160,44 @@ fn get_first_identifier_helper(root: Node) -> Option<Node> {
             },
     }
 }
+
+pub fn get_last_identifier(root: Node) -> Option<Node> {
+    match &root.get_name() as &str { "mtext" => None,
+        "annotation" | "xml-annotation" | "mfrac" | "mtable" | "mo" => 
+            match root.get_next_sibling() {
+                None => None,
+                Some(x) => get_last_identifier(x),
+            },
+         "mi" | "msub" | "msup" | "msubsup" =>
+         {
+             let n = root.get_next_sibling();
+             if n.is_some() {
+                 let t = get_last_identifier(n.unwrap());
+                 if t.is_some() {
+                     return t;
+                 }
+             }
+             if &root.get_name() == "mi" { Some(root) }
+             else {
+                 get_first_identifier_helper(root)
+             }
+         },
+        _ => {
+             let n = root.get_next_sibling();
+             if n.is_some() {
+                 let t = get_last_identifier(n.unwrap());
+                 if t.is_some() {
+                     return t;
+                 }
+             }
+             match root.get_first_child() {
+                 None => None,
+                 Some(x) => get_last_identifier(x),
+             }
+        }
+    }
+}
+
 
 
 fn find_end_of_identifier(from: Node) -> Node {
