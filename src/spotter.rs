@@ -34,7 +34,8 @@ pub struct Declaration {
     pub sentence: Node,
 
     pub idtype: IdentifierType,
-    pub mathnode_is_restriction: bool
+    pub mathnode_is_restriction: bool,
+    pub is_universal: bool,
 }
 
 
@@ -46,12 +47,13 @@ pub struct RawDeclaration {
     pub definiens_notes : Vec<&'static str>,
     pub definiendum_notes : Vec<&'static str>,
     pub no_noun: bool,
+    pub is_universal: bool,
 }
 
 
 pub fn get_simple_declaration_pattern() -> P<'static, &'static str, &'static str> {
-    let p_indefinite_article= P::Or(vec![P::W("a"), P::W("an"), P::W("any"), P::W("some"), P::W("every")]);
-    let p_indefinite_article_box = Box::new(p_indefinite_article);
+    let p_indefinite_article= P::Or(vec![P::W("a"), P::W("an"), P::W("any"), P::W("some"), P::W("every"), P::W("each"), P::W("all")]);
+    let p_indefinite_article_box = Box::new(p_indefinite_article.clone());
     let p_mathformula = P::W("MathFormula");
     let p_mf_marked = P::Marked("definiendum", vec![], Box::new(p_mathformula));
 
@@ -66,13 +68,28 @@ pub fn get_simple_declaration_pattern() -> P<'static, &'static str, &'static str
     let p_mf_is = P::Seq(vec![p_mf_marked.clone(), P::W("is"), p_long_dfs_marked.clone()]);
 
     // a prime number p
-    let p_a_np_mf = P::PhrSE(Phrase::NP, false, p_indefinite_article_box, Box::new(p_mf_marked));
+    let p_a_np_mf = P::PhrSE(Phrase::NP, false, p_indefinite_article_box, Box::new(p_mf_marked.clone()));
     let p_a_np_mf_marked = P::MarkedExcl("definiens", vec![], Box::new(p_a_np_mf), 1, 1);
 
+    // for $p \in P$ followed by something either an NP or something indicating that the
+    // declaration is complete.
+    let p_short = P::Seq(vec![P::Or(vec![P::W("for"), P::W("let"), P::Seq(vec![P::W("for"), p_indefinite_article.clone()])]),
+                         p_mf_marked.clone(),
+                         P::Or(vec![p_long_dfs_marked.clone(), P::W(","), P::W("."), P::W("and")])]);
 
-    let pattern = P::Or(vec![p_let_pattern, p_a_np_mf_marked, p_mf_is]);
 
-    pattern
+    // there is a prime number p
+    let p_there = P::W("there");
+    let p_existential_q = P::Or(vec![P::W("exists"), P::W("is")]);
+
+    let pattern_existential = P::Marked("declaration", vec!["existential"],
+                                        Box::new(P::Seq(vec![p_there, p_existential_q, p_a_np_mf_marked.clone()])));
+
+    let pattern_universal = P::Marked("declaration", vec!["universal"],
+                                      Box::new(P::Or(vec![p_let_pattern, p_a_np_mf_marked, p_mf_is, p_short])));
+
+
+    P::Or(vec![pattern_existential, pattern_universal])
 }
 
 
@@ -90,6 +107,7 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
             let mut restr_end = 0;
             let mut definiens_notes : Option<Vec<&str>> = None;
             let mut definiendum_notes : Option<Vec<&str>> = None;
+            let mut is_universal = true;
             for mark in &match_.marks {
                 if mark.marker == "definiendum" {
                     var_pos = mark.offset_start;
@@ -98,7 +116,14 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
                     restr_start = mark.offset_start;
                     restr_end = mark.offset_end;
                     definiens_notes = Some(mark.notes.clone());
+                } else if mark.marker == "declaration" {
+                    if mark.notes.contains(&"existential") {
+                        is_universal = false;
+                    } else {
+                        assert!(mark.notes.contains(&"universal"));
+                    }
                 }
+
             }
             let variable_node = xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]", sentence_id, var_pos+1)).unwrap().get_nodes_as_vec()[0].clone();
             let r_start_node = xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]", sentence_id, restr_start+1)).unwrap().get_nodes_as_vec()[0].clone();
@@ -111,6 +136,7 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
                 definiens_notes : definiens_notes.unwrap(),
                 definiendum_notes : definiendum_notes.unwrap(),
                 no_noun : restr_end <= restr_start,
+                is_universal: is_universal,
             });
         }
     }
@@ -127,6 +153,7 @@ pub fn naive_raw_to_quad(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
         restriction_end: r.restriction_end.clone(),
         idtype: IdentifierType::nosequence,
         mathnode_is_restriction : false,
+        is_universal: r.is_universal,
     }).collect()
 }
 
@@ -165,6 +192,7 @@ pub fn first_identifier_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> 
                     sentence: r.sentence.clone(),
                     idtype: IdentifierType::nosequence,
                     mathnode_is_restriction : false,
+                    is_universal: r.is_universal,
                 });
                 break;
             }
@@ -192,6 +220,7 @@ pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
         let mut is_ell_seq = false;
         let mut seq_start : Option<Node> = None;
         let mut seq_end : Option<Node> = None;
+        let mut first_structured_identifier : Option<(Node, Node)> = None;
         for id in &identifiers {
             if id.tags.contains(&IdentifierTags::First) {
                 first_identifier = Some((id.start.clone(), id.end.clone()));
@@ -208,6 +237,9 @@ pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
                 }
                 seq_end = Some(id.end.clone());
             }
+            if id.tags.contains(&IdentifierTags::Structured) {
+                first_structured_identifier = Some((id.start.clone(), id.end.clone()));
+            }
         }
         let last_node = get_last_identifier(math_node.clone());
 
@@ -223,28 +255,43 @@ pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
                 sentence: r.sentence.clone(),
                 idtype: if is_rel_seq { IdentifierType::elliptic_related } else { IdentifierType::elliptic_nonrelated },
                 mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != seq_end.as_ref().unwrap(),
+                is_universal: r.is_universal,
             });
 
         // OPTION 2: !is_rel_seq   (MISSING: is sequence, and plural restriction)
-        } else if !is_rel_seq {
+        } else if seq_start.is_some() && !is_rel_seq {
             for id in &identifiers {
-                result.push(Declaration {
-                    mathnode: r.mathnode.clone(),
-                    var_start: id.start.clone(),
-                    var_end: id.end.clone(),
-                    restriction_start: if !r.no_noun { r.restriction_start.clone() } else { r.mathnode.clone() },
-                    restriction_end: if !r.no_noun { r.restriction_end.clone() } else { r.mathnode.clone() },
-                    sentence: r.sentence.clone(),
-                    idtype: IdentifierType::nosequence,
-                    mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != &id.end,
-            });
-
                 if id.tags.contains(&IdentifierTags::FirstSeq) {
-
+                    result.push(Declaration {
+                        mathnode: r.mathnode.clone(),
+                        var_start: id.start.clone(),
+                        var_end: id.end.clone(),
+                        restriction_start: if !r.no_noun { r.restriction_start.clone() } else { r.mathnode.clone() },
+                        restriction_end: if !r.no_noun { r.restriction_end.clone() } else { r.mathnode.clone() },
+                        sentence: r.sentence.clone(),
+                        idtype: IdentifierType::nosequence,
+                        mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != &id.end,
+                        is_universal: r.is_universal,
+                    });
                 }
             }
 
-        // OPTION 3: first_identifier.is_some()
+        // OPTION 3: first_structured_identifier.is_some()
+        } else if first_structured_identifier.is_some() {
+            result.push(Declaration {
+                mathnode: r.mathnode.clone(),
+                var_start: first_structured_identifier.as_ref().unwrap().0.clone(),
+                var_end: first_structured_identifier.as_ref().unwrap().1.clone(),
+                restriction_start: if !r.no_noun { r.restriction_start.clone() } else { r.mathnode.clone() },
+                restriction_end: if !r.no_noun { r.restriction_end.clone() } else { r.mathnode.clone() },
+                sentence: r.sentence.clone(),
+                idtype: IdentifierType::nosequence,
+                mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != &first_structured_identifier.unwrap().1,
+                is_universal: r.is_universal,
+            });
+
+
+        // OPTION 4: first_identifier.is_some()
         } else if first_identifier.is_some() {
             result.push(Declaration {
                 mathnode: r.mathnode.clone(),
@@ -255,6 +302,7 @@ pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
                 sentence: r.sentence.clone(),
                 idtype: IdentifierType::nosequence,
                 mathnode_is_restriction : !r.no_noun && last_node.is_some() && last_node.as_ref().unwrap() != &first_identifier.unwrap().1,
+                is_universal: r.is_universal,
             });
 
         }
