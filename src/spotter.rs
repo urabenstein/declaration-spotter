@@ -103,9 +103,9 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
             let sentence_node = sentence.node.as_ref().unwrap();
             let sentence_id = sentence_node.get_property("id").unwrap();
             let mut var_pos = 0;
-            let mut restr_start = 0;
-            let mut restr_end = 0;
-            let mut definiens_notes : Option<Vec<&str>> = None;
+            let mut restr_start = 1;
+            let mut restr_end = 1;
+            let mut definiens_notes : Option<Vec<&str>> = Some(vec![]);
             let mut definiendum_notes : Option<Vec<&str>> = None;
             let mut is_universal = true;
             for mark in &match_.marks {
