@@ -59,7 +59,7 @@ pub fn get_simple_declaration_pattern() -> P<'static, &'static str, &'static str
 
     // a prime number, any integer, ...
     let p_long_dfs = P::PhrS(Phrase::NP, true, p_indefinite_article_box.clone());
-    let p_long_dfs_marked = P::MarkedExcl("definiens", vec!["long"], Box::new(p_long_dfs), 1, 0);
+    let p_long_dfs_marked = P::MarkedExcl("definiens", vec!["long"], Box::new(p_long_dfs), 0, 0);
 
     // let p be a prime number
     let p_let_pattern = P::Seq(vec![P::W("let"), p_mf_marked.clone(), P::W("be"), p_long_dfs_marked.clone()]);
@@ -68,15 +68,22 @@ pub fn get_simple_declaration_pattern() -> P<'static, &'static str, &'static str
     let p_mf_is = P::Seq(vec![p_mf_marked.clone(), P::W("is"), p_long_dfs_marked.clone()]);
 
     // a prime number p
-    let p_a_np_mf = P::PhrSE(Phrase::NP, false, p_indefinite_article_box, Box::new(p_mf_marked.clone()));
-    let p_a_np_mf_marked = P::MarkedExcl("definiens", vec![], Box::new(p_a_np_mf), 1, 1);
+    let p_a_np_mf = P::PhrSE(Phrase::NP, false, Box::new(P::Seq(vec![p_indefinite_article.clone(), P::AnyW])),
+                            Box::new(p_mf_marked.clone()));
+    let p_a_np_mf_marked = P::MarkedExcl("definiens", vec![], Box::new(p_a_np_mf), 0, 1);
 
     // for $p \in P$ followed by something either an NP or something indicating that the
     // declaration is complete.
-    let p_short = P::Seq(vec![P::Or(vec![P::W("for"), P::W("let"), P::Seq(vec![P::W("for"), p_indefinite_article.clone()])]),
+    let p_short = P::Seq(vec![P::Or(vec![P::Seq(vec![P::Or(vec![P::W("where"), P::W("with"), P::W("for")]),
+                                                        p_indefinite_article.clone()]),
+        P::W("for"), P::W("where"), P::W("with"), P::W("let"), P::W("suppose"), P::W("assume"), P::W("assuming"), P::W("given")]),
                          p_mf_marked.clone(),
                          P::Or(vec![p_long_dfs_marked.clone(), P::W(","), P::W("."), P::W("and")])]);
 
+    // of degree d
+    let p_short_dfs_no_article = P::Marked("definiens", vec![], Box::new(P::PhrE(Phrase::NP, false,
+                                    Box::new(P::Seq(vec![P::AnyW, p_mf_marked.clone()])))));
+    let p_of = P::Seq(vec![P::W("of"), p_short_dfs_no_article.clone()]);
 
     // there is a prime number p
     let p_there = P::W("there");
@@ -86,7 +93,7 @@ pub fn get_simple_declaration_pattern() -> P<'static, &'static str, &'static str
                                         Box::new(P::Seq(vec![p_there, p_existential_q, p_a_np_mf_marked.clone()])));
 
     let pattern_universal = P::Marked("declaration", vec!["universal"],
-                                      Box::new(P::Or(vec![p_let_pattern, p_a_np_mf_marked, p_mf_is, p_short])));
+                                      Box::new(P::Or(vec![p_let_pattern, p_a_np_mf_marked, p_mf_is, p_short, p_of])));
 
 
     P::Or(vec![pattern_existential, pattern_universal])
@@ -126,6 +133,15 @@ pub fn get_declarations(document: &mut Document, pattern: &P<&'static str, &'sta
 
             }
             let variable_node = xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]", sentence_id, var_pos+1)).unwrap().get_nodes_as_vec()[0].clone();
+            match xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]",
+                    sentence_id, var_pos+2)) {
+                Err(_) => { },
+                Ok(x) => {
+                    if x.get_nodes_as_vec()[0].get_all_content() == "-" {
+                        continue;  // senna's fault (MathFormula-algebra etc)
+                    }
+                }
+            };
             let r_start_node = xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]", sentence_id, restr_start+1)).unwrap().get_nodes_as_vec()[0].clone();
             let r_end_node = xpath_context.evaluate(&format!("(//span[@id='{}']//span[@class='word'])[{}]", sentence_id, restr_end)).unwrap().get_nodes_as_vec()[0].clone();
             results.push(RawDeclaration {
@@ -226,6 +242,7 @@ pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
                 first_identifier = Some((id.start.clone(), id.end.clone()));
             }
             if id.tags.contains(&IdentifierTags::FirstSeq) {
+                println!("SEQ");
                 if seq_start.is_none() {
                     seq_start = Some(id.start.clone());
                     if id.tags.contains(&IdentifierTags::RelSeq) {
@@ -260,6 +277,7 @@ pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
 
         // OPTION 2: !is_rel_seq   (MISSING: is sequence, and plural restriction)
         } else if seq_start.is_some() && !is_rel_seq {
+            println!("Option 2");
             for id in &identifiers {
                 if id.tags.contains(&IdentifierTags::FirstSeq) {
                     result.push(Declaration {
@@ -293,6 +311,14 @@ pub fn sequence_purifier(raw: &Vec<RawDeclaration>) -> Vec<Declaration> {
 
         // OPTION 4: first_identifier.is_some()
         } else if first_identifier.is_some() {
+            if r.no_noun {
+                let x =  first_identifier.as_ref().unwrap().1.get_next_sibling();
+                if x.is_none() {
+                    continue;
+                } else if x.as_ref().unwrap().get_name() == "annotation" || x.as_ref().unwrap().get_name() == "annotation-xml" {
+                    continue;
+                }
+            }
             result.push(Declaration {
                 mathnode: r.mathnode.clone(),
                 var_start: first_identifier.as_ref().unwrap().0.clone(),

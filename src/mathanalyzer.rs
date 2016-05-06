@@ -52,8 +52,12 @@ pub fn find_potential_identifiers(math_node : Node) -> Vec<Identifier> {
                     tags.push(IdentifierTags::Ellipsis);
                 }
                 if separator != "," && separator != "" {
-                    // println!("Sep: '{}'", separator);
+                    println!("Sep: '{}'", separator);
                     tags.push(IdentifierTags::RelSeq);
+                }
+                println!("Seq: '{}' to '{}'", nodes[0].0.get_all_content(), nodes[nodes.len()-1].1.get_all_content());
+                if separator == "=" {  // definition
+                    return vec![];
                 }
                     //for n in &nodes {
                     //     results.push(Identifier { node: n.clone(), tags: tags.clone() });
@@ -206,7 +210,7 @@ fn get_first_structured_identifier(root: Node) -> Option<(Node, Node, bool)> {
                 while cur.is_some() {
                     println!("Matching {}", cur.as_ref().unwrap().get_all_content());
                     match &cur.as_ref().unwrap().get_name() as &str {
-                        "msub" | "msup" | "msubsup" | "mi" => cur = root.clone().get_next_sibling(),
+                        "msub" | "msup" | "msubsup" | "mi" => { },
                         "mo" => {
                             let c = cur.as_ref().unwrap().get_all_content();
                             if c == d.unwrap() {
@@ -239,10 +243,14 @@ fn get_first_identifier(root: Node) -> Option<Node> {
         "xml-annotation" => None,
         "mfrac" => None,
         "mtable" => None,
-        "mi" => Some(root),
-        "msub" => get_first_identifier_helper(root),
-        "msup" => get_first_identifier_helper(root),
-        "msubsup" => get_first_identifier_helper(root),
+        "mi" => match root.clone().get_next_sibling() {
+            None => Some(root),
+            Some(x) => if x.get_all_content() == "=" { None } else { Some(root) }
+        },
+        "msub" | "msup" | "msubsup"  => match root.clone().get_next_sibling() {
+            None => get_first_identifier_helper(root),
+            Some(x) => if x.get_all_content() == "=" { None } else { get_first_identifier_helper(root) }
+        },
         "mo" => if root.get_all_content() == "(" {
             match root.get_next_sibling() {
                 None => None,

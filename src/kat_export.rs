@@ -11,18 +11,18 @@ pub fn kat_export(declarations: &Vec<Declaration>) -> String {
     let mut s = String::new();
     s.push_str("<rdf:RDF xmlns:d=\"http://jfschaefer.de/declarations/KAnnSpec#\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:kat=\"https://github.com/KWARC/KAT/\"><rdf:Description><kat:annotation rdf:nodeID=\"kat_run\"></kat:annotation></rdf:Description><rdf:Description rdf:nodeID=\"kat_run\"><rdf:type rdf:resource=\"kat:run\"></rdf:type><kat:date rdf:datatype=\"xs:dateTime\">2016-03-13T14:37:30.858Z</kat:date><kat:tool>KAT</kat:tool><kat:runid>0</kat:runid></rdf:Description><rdf:Description><kat:annotation rdf:nodeID=\"KAT_Declarations_KAnnSpec\"></kat:annotation></rdf:Description><rdf:Description rdf:nodeID=\"KAT_Declarations_KAnnSpec\"><rdf:type rdf:resource=\"kat:kannspec\"></rdf:type><kat:kannspec-name>Declarations</kat:kannspec-name><kat:kannspec-uri>http://localhost:3000/KAnnSpecs/declaration-annotations.xml</kat:kannspec-uri></rdf:Description>");
     let mut hs : HashMap<(Node, Node), String> = HashMap::new();
-    let mut declared_math_nodes : HashSet<Node> = HashSet::new();
+    let mut var_start_nodes : HashSet<Node> = HashSet::new();
     let mut restriction_id_count = 0usize;
     let mut decl_id_count = 0usize;
     for q in declarations {
-        if !declared_math_nodes.contains(&q.mathnode) {
-            declared_math_nodes.insert(q.mathnode.clone());
+        if !var_start_nodes.contains(&q.var_start) {
+            var_start_nodes.insert(q.var_start.clone());
         } else {
             continue;
         }
         // create (if required) text restriction
         let startend = (q.restriction_start.clone(), q.restriction_end.clone());
-        if !hs.contains_key(&startend) {
+        if  !hs.contains_key(&startend) {
                 let restrictionkatid = format!("restriction_{}", restriction_id_count);
                 restriction_id_count += 1;
                 s.push_str(&format!("<rdf:Description rdf:nodeID=\"{}\"><kat:run rdf:nodeID=\"kat_run\"/><kat:kannspec rdf:nodeID=\"KAT_Declarations_KAnnSpec\"/><kat:concept>Restriction</kat:concept><kat:type rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#Restriction\"/><kat:annotates rdf:resource=\"http://localhost:3000/content/test.html#cse(%2F%2F*%5B%40id%3D'{}'%5D%2C%2F%2F*%5B%40id%3D'{}'%5D%2C%2F%2F*%5B%40id%3D'{}'%5D)\"/><d:restrictiontype rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#typerestriction\"/></rdf:Description>", &restrictionkatid, q.sentence.get_property("id").unwrap(), q.restriction_start.get_property("id").unwrap(), q.restriction_end.get_property("id").unwrap()));
@@ -39,11 +39,11 @@ pub fn kat_export(declarations: &Vec<Declaration>) -> String {
             }
             math_restriction_id = Some(hs.get(&startend).unwrap().to_owned());
         }
-        let restrictionkatid = hs.get(&startend).unwrap();
+        let restrictionkatid = hs.get(&startend);
         let declid = format!("identifier_{}", decl_id_count);
         decl_id_count += 1;
         let mathnode = q.mathnode.get_property("id").unwrap();
-        s.push_str(&format!("<rdf:Description rdf:nodeID=\"{}\"><kat:run rdf:nodeID=\"kat_run\"/><kat:kannspec rdf:nodeID=\"KAT_Declarations_KAnnSpec\"/><kat:concept>Identifier</kat:concept><kat:type rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#Identifier\"/><kat:annotates rdf:resource=\"http://localhost:3000/content/test.html#cse(%2F%2F*%5B%40id%3D'{}'%5D%2C%2F%2F*%5B%40id%3D'{}'%5D%2C%2F%2F*%5B%40id%3D'{}'%5D)\"/><d:restrictedby rdf:nodeID=\"{}\"/>{}<d:identifierisseqtype rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#{}\"/><d:quantification rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#{}\"/></rdf:Description>", declid, mathnode, q.var_start.get_property("id").unwrap(), q.var_end.get_property("id").unwrap(), restrictionkatid,
+        s.push_str(&format!("<rdf:Description rdf:nodeID=\"{}\"><kat:run rdf:nodeID=\"kat_run\"/><kat:kannspec rdf:nodeID=\"KAT_Declarations_KAnnSpec\"/><kat:concept>Identifier</kat:concept><kat:type rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#Identifier\"/><kat:annotates rdf:resource=\"http://localhost:3000/content/test.html#cse(%2F%2F*%5B%40id%3D'{}'%5D%2C%2F%2F*%5B%40id%3D'{}'%5D%2C%2F%2F*%5B%40id%3D'{}'%5D)\"/>{}{}<d:identifierisseqtype rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#{}\"/><d:quantification rdf:resource=\"http://jfschaefer.de/declarations/KAnnSpec#{}\"/></rdf:Description>", declid, mathnode, q.var_start.get_property("id").unwrap(), q.var_end.get_property("id").unwrap(), if restrictionkatid.is_some() { format!("<d:restrictedby rdf:nodeID=\"{}\"/>", restrictionkatid.unwrap()).to_owned() } else { "".to_owned() },
         if math_restriction_id.is_some() {
             format!("<d:restrictedby rdf:nodeID=\"{}\"/>", math_restriction_id.unwrap()).to_owned()
         } else { "".to_owned() },
