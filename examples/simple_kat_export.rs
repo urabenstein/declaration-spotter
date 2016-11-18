@@ -29,6 +29,10 @@ pub fn main() {
 
     // let mut kat_vec : Vec<DeclarationQuadruple> = Vec::new();
 
+    first_try(&mut document);
+
+    return;
+
     let pattern = get_simple_declaration_pattern();
 
     /* for mut sentence in document.annotated_sentence_iter() {
