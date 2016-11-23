@@ -4,9 +4,11 @@ version = "0.0.1"
 authors = ["jfschaefer <j.schaefer@jacobs-university.de>"]
 
 [lib]
-name = "declarationspotter"
+name = "spotter"
 crate-type = ["rlib", "dylib", "staticlib"]
 
+[dependencies]
+regex = "0.1"
 [dependencies.libxml]
 git = "https://github.com/jfschaefer/rust-libxml.git"
 [dependencies.rust-senna]
