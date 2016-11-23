@@ -7,7 +7,7 @@ use llamapun::data::{Document};
 
 use libxml::tree::Node;
 //use libxml::xpath::Context;
-use llamapun::patterns::Pattern as P;
+//use llamapun::patterns::Pattern as P;
 
 use std::error::Error;
 use std::io::prelude::*;
@@ -15,7 +15,7 @@ use std::fs::File;
 use std::path::Path;
 use std::fs::OpenOptions;
 use regex::Regex;
-use regex::RegexSet;
+//use regex::RegexSet;
 
 
 
@@ -28,7 +28,7 @@ static SI_PREFIX : &'static [&'static str] = &["da","h","k","M","G","T","P","E",
 
 static UNIT_SYMBOLS : &'static [&'static str] = &["m","g","s","A","K","mol","cd", /* SI-units with g instead of kg */
     "rad","sr","Hz","N","Pa","J","W","C","V","F","S","Wb","T","H","lm","lx","Bq","Gy","Sv","kat", /* SI coherent derived units; Ohm and degree C are still missing */
-    "G"]; /*others: so far Gauß */
+    "G", "eV", "pc"]; /*others: so far G:Gauß; eV:electron Volt; pc:parsec */
 
 
 static DEBUG : bool = false;
@@ -43,29 +43,145 @@ pub struct PossQE {
 }
 
 pub fn first_try(document : &mut Document) {
-    evaluate_text(document);
-   // evaluate_math(document);
+    // evaluate_text(document);
+    // evaluate_math(document);
+
+    for p in document.paragraph_iter(){
+        let root = p.dnm.root_node;
+        //this is the real root node, not just the one of the paragraph
+     //   print_document(Some(root.clone()), String::new());
+        walk_through_document(Some(root));
+        break;
+    }
+
+    /*
+    let opt_dnm = document.dnm;
+    if opt_dnm.is_none(){
+        return;
+    }
+    let dnm = opt_dnm.unwrap();
+    let root = dnm.root_node;
+
+    walk_through_document(Some(root));
+    */
 }
 
+pub fn walk_through_document(opt_node : Option<Node>){
+    if opt_node.is_none(){
+        return;
+    }
+    let node = opt_node.unwrap();
+
+    if node.get_name().eq("math"){
+        let res = math_ends_with_mn(Some(node.clone()));
+        if res.is_some(){
+            if node.get_next_sibling().is_none(){
+                return;
+            }
+            let sib = node.get_next_sibling().unwrap();
+            if sib.get_name().eq("text"){
+                let content = sib.get_content();
+                let mut split = content.split_whitespace();
+                let string = format!("{} {}",res.unwrap() ,content);
+
+                //TODO match the string against a regexp
+
+            }
+          // check if the next sibling is a text node and starts with a unit expression
+        }
+    }
+
+    walk_through_document(node.get_first_child());
+    walk_through_document(node.get_next_sibling());
+
+
+}
+
+pub fn math_ends_with_mn(math_node : Option<Node>) -> Option<f64>{
+    if math_node.is_none(){
+        return None;
+    }
+    let node = math_node.unwrap();
+
+    match &node.get_name() as &str{
+        "math" | "semantics" => math_ends_with_mn(node.get_first_child()),
+        "mrow" => {
+            let sib = node.get_next_sibling();
+            if sib.is_some() && sib.unwrap().get_name().eq("mrow") {
+                return math_ends_with_mn(node.get_next_sibling());
+            }
+            return math_ends_with_mn(node.get_first_child());
+        },
+        "msub" | "mi" | "mo" | "msup" => math_ends_with_mn(node.get_next_sibling()),
+        "mn" => {
+            if node.get_next_sibling().is_some(){
+                math_ends_with_mn(node.get_next_sibling());
+            }
+            let content = node.get_all_content().parse::<f64>();
+            if content.is_err() {
+                return None;
+            }
+            return Some(content.unwrap());
+        },
+        _ => None,
+    }
+}
+
+
+pub fn print_document(opt_node : Option<Node>, space : String){
+    if opt_node.is_none(){
+        return;
+    }
+
+    let node = opt_node.unwrap();
+
+    println!("{} {} {} {}",space.len(), space, node.get_name(), node.get_content());
+
+    let more_space = format!("{} ",space);
+
+    print_document(node.get_first_child(), more_space);
+    print_document(node.get_next_sibling(), space);
+
+}
+
+pub fn get_number_prefix_unit_regexp() -> Regex{
+    let number : String = r"\d*\.?\d+".to_string();
+
+    let mut prefix_regex : String = r"".to_string();
+    let mut unit_regex : String = r"".to_string();
+
+    for p in SI_PREFIX{
+        prefix_regex = format!("{}|{}", prefix_regex, p);
+    }
+    prefix_regex.remove(0);
+
+    for u in UNIT_SYMBOLS{
+        unit_regex = format!("{}|{}", unit_regex, u);
+    }
+    unit_regex.remove(0);
+    let combined : String = format!(r"({})\s(({})?({})\s?)+(\s|\)|\.|,)",number, prefix_regex, unit_regex);
+    // searches for number (prefix? unit)+ and a final character at the end (whitespace, closing bracket, dot, comma)
+    let combined_regex = Regex::new(&combined).unwrap();
+    combined_regex
+}
+
+
 pub fn evaluate_text(document : &mut Document){
-    let simple_pattern : P<'static, &'static str, &'static str> = P::W("GeV");
+    // let simple_pattern : P<'static, &'static str, &'static str> = P::W("GeV");
 
     for sentence in document.sentence_iter(){
         let ref text = sentence.range.dnm.plaintext;
-        let number : String = r"\d*\.?\d+".to_string();
-        let reg = Regex::new(&(number + " GeV")).unwrap();
 
-        let mut prefix_regex = r"";
+        let combined_regex = get_number_prefix_unit_regexp();
 
-        for p in SI_PREFIX{
-            prefix_regex = &format!("{}|{}", prefix_regex, p);
+        for cap in combined_regex.captures_iter(text){
+            let mut res = cap.at(0).unwrap_or("").to_string();
+            let res_len = res.len();
+            res.truncate(res_len - 1);
+
+            println!("{}",res);
         }
 
-        println!("{}", prefix_regex);
-
-        for cap in reg.captures_iter(text){
-            println!("{}",cap.at(0).unwrap_or(""));
-        }
 
         //for res in text.matches("[0-9] GeV"){
         //    println!("{}", res);
@@ -73,27 +189,6 @@ pub fn evaluate_text(document : &mut Document){
 
         break;
 
-        /*
-        let opt_size = text.find("GeV");
-        if opt_size.is_some(){
-            let index = opt_size.unwrap();
-            for i in 0..20{
-                let ch = text.as_bytes()[index-10+i] as char;
-                print!("{}", ch );
-            }
-            println!("");
-        }*/
-        //let a : String = String::new();
-        //a.as_bytes
-
-       // let matches = P::match_sentence(&sentence, &simple_pattern);
- //       for match_ in &matches {
-  //          println!("start {}, end {}", match_.match_start, match_.match_end);
-            //for mark in match_.marks{
-            //    println!("mark {}", mark.marker);
-            //}
-            //TODO
-   //     }
 
     }
 }
@@ -109,38 +204,40 @@ pub fn evaluate_math(document : &mut Document) {
 
     create_kat_annotations_header();
 
-    if res.is_ok(){
-        let res_vec : Vec<Node> = match res{
-            Ok(object) => object.get_nodes_as_vec(),
-            Err (_) => Vec::new(),
-        };
+    if res.is_err(){
+        return;
+    }
 
-        for node in res_vec{
+    let res_vec : Vec<Node> = match res{
+        Ok(object) => object.get_nodes_as_vec(),
+        Err (_) => Vec::new(),
+    };
 
-            let pattern1 : [&str; 3] = ["mn","mo","mtext"];
-            let pattern2 : [&str; 5] = ["mn", "mo", "mi", "mo", "mtext"];
-            let pattern3 : [&str; 11] = ["mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi"];
+    for node in res_vec{
 
-
-           // pattern_spotter(Some(node.clone()),&pattern2, &mut vec2, check_result_pattern2);
-
-            let mut leafs = Vec::new();
-            leafs = leafs_of_math_tree(Some(node.clone()), leafs);
+        let pattern1 : [&str; 3] = ["mn","mo","mtext"];
+        let pattern2 : [&str; 5] = ["mn", "mo", "mi", "mo", "mtext"];
+        let pattern3 : [&str; 11] = ["mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi"];
 
 
-            for leaf in leafs.clone(){
-                if DEBUG {
-                    println!("{} {}", leaf.get_name(), leaf.get_all_content());
-                }
-            }
+        // pattern_spotter(Some(node.clone()),&pattern2, &mut vec2, check_result_pattern2);
 
-            pattern_spotter_leafs(&leafs, &pattern1, &mut Vec::new(), check_result_pattern1);
-            pattern_spotter_leafs(&leafs, &pattern2, &mut Vec::new(), check_result_pattern2);
-            pattern_spotter_leafs(&leafs, &pattern3, &mut Vec::new(), check_result_pattern3);
+        let mut leafs = Vec::new();
+        leafs = leafs_of_math_tree(Some(node.clone()), leafs);
 
+
+        for leaf in leafs.clone(){
             if DEBUG {
-                println!("");
+                println!("{} {}", leaf.get_name(), leaf.get_all_content());
             }
+        }
+
+        pattern_spotter_leafs(&leafs, &pattern1, &mut Vec::new(), check_result_pattern1);
+        pattern_spotter_leafs(&leafs, &pattern2, &mut Vec::new(), check_result_pattern2);
+        pattern_spotter_leafs(&leafs, &pattern3, &mut Vec::new(), check_result_pattern3);
+
+        if DEBUG {
+            println!("");
         }
     }
 
