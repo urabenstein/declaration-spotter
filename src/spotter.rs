@@ -28,7 +28,7 @@ static SI_PREFIX : &'static [&'static str] = &["da","h","k","M","G","T","P","E",
 
 static UNIT_SYMBOLS : &'static [&'static str] = &["m","g","s","A","K","mol","cd", /* SI-units with g instead of kg */
     "rad","sr","Hz","N","Pa","J","W","C","V","F","S","Wb","T","H","lm","lx","Bq","Gy","Sv","kat", /* SI coherent derived units; Ohm and degree C are still missing */
-    "G", "eV", "pc"]; /*others: so far G:Gauß; eV:electron Volt; pc:parsec */
+    "G", "eV", "pc", "mag", "M_⊙"]; /*others: so far G:Gauß; eV:electron Volt; pc:parsec; mag: :(; M_⊙: solar mass*/
 
 
 static DEBUG : bool = false;
@@ -43,16 +43,15 @@ pub struct PossQE {
 }
 
 pub fn first_try(document : &mut Document) {
-    // evaluate_text(document);
-    // evaluate_math(document);
 
     for p in document.paragraph_iter(){
         let root = p.dnm.root_node;
-        //this is the real root node, not just the one of the paragraph
-     //   print_document(Some(root.clone()), String::new());
-        walk_through_document(Some(root));
-        break;
+ //       print_document(Some(root.clone()), String::new());
+        pre_process(Some(root), true);
     }
+
+    evaluate_text(document);
+    evaluate_math(document);
 
     /*
     let opt_dnm = document.dnm;
@@ -66,35 +65,138 @@ pub fn first_try(document : &mut Document) {
     */
 }
 
-pub fn walk_through_document(opt_node : Option<Node>){
+pub fn pre_process(opt_node : Option<Node>, start : bool){
     if opt_node.is_none(){
         return;
     }
     let node = opt_node.unwrap();
 
+    // if the math node ends with a number i.e. $R = 5$, then copy that number to the following text, s.t.
+    // one can detect $R = 5$ kg as $R = 5$ 5 kg.
     if node.get_name().eq("math"){
-        let res = math_ends_with_mn(Some(node.clone()));
-        if res.is_some(){
-            if node.get_next_sibling().is_none(){
-                return;
-            }
-            let sib = node.get_next_sibling().unwrap();
-            if sib.get_name().eq("text"){
-                let content = sib.get_content();
-                let mut split = content.split_whitespace();
-                let string = format!("{} {}",res.unwrap() ,content);
+        let mut leafs = Vec::new();
+        leafs = leafs_of_math_tree(Some(node.clone()), leafs);
+        let len = leafs.len();
+        if len > 0 {
+            //check if leafs ends with mn mo mn
+            // where mo is +-
+            if len >= 3 && leafs[len-3].get_name().eq("mn") && leafs[len-2].get_name().eq("mo") &&
+                leafs[len-1].get_name().eq("mn") && leafs[len-2].get_all_content().eq("±") {
 
-                //TODO match the string against a regexp
+                let number1_res = leafs[len-3].get_all_content().parse::<f64>();
+                let number2_res = leafs[len-1].get_all_content().parse::<f64>();
 
+                if number1_res.is_err() || number2_res.is_err(){
+                    println!("mn with no number {} {}", leafs[len-3].get_all_content(), leafs[len-1].get_all_content());
+                    return;
+                }
+
+                let number1 = number1_res.unwrap();
+                let number2 = number2_res.unwrap();
+                let range_min = number1 - number2;
+                let range_max = number1 + number2;
+                let new_content = format!("{} to {}", range_min, range_max);
+                prefix_node_content(node.get_next_sibling(), &new_content);
+
+            }else if len >= 2 && leafs[len-1].get_name().eq("mn") && leafs[len-2].get_name().eq("mo") &&
+                    leafs[len-2].get_all_content().eq("±"){
+                // leafs ends with mo mn, where mo is +-
+                let number_res = leafs[len-1].get_all_content().parse::<f64>();
+
+                if number_res.is_err(){
+                    println!("mn with no number {} ", leafs[len-1].get_all_content());
+                    return;
+                }
+
+                let number = number_res.unwrap();
+                let new_content = format!("{} to {}", -number, number);
+                prefix_node_content(node.get_next_sibling(), &new_content);
+
+            }else if leafs[len-1].get_name().eq("mn") {
+                // last is mn
+                let number = leafs[len - 1].get_all_content();
+                prefix_node_content(node.get_next_sibling(), &number);
             }
-          // check if the next sibling is a text node and starts with a unit expression
         }
     }
 
-    walk_through_document(node.get_first_child());
-    walk_through_document(node.get_next_sibling());
+    pre_process(node.get_first_child(), false);
+    if !start {
+        pre_process(node.get_next_sibling(), false);
+    }
 
 
+}
+
+pub fn prefix_node_content(opt_node : Option<Node>, prefix : &str){
+    if opt_node.is_none(){
+        return;
+    }
+    let node = opt_node.unwrap();
+    if node.get_name().eq("text"){
+        let new_content = &format!(" {}{}", prefix, node.get_content());
+        node.set_content(new_content);
+    }
+
+}
+
+pub fn calculate_msup(msup_node : Node) -> Option<String> {
+    //if both children are of type mn, then return the result of the power operation in the form of an mn node
+    //alternatively if child1 : mn and child2 : mrow
+    //with child2 having again 2 kids, one of type mo (with content -) and one of mn
+    //then compute also compute the result of the operation
+    if msup_node.get_first_child().is_none() {
+        return None;
+    }
+    let child1 = msup_node.get_first_child().unwrap();
+    if child1.get_next_sibling().is_none() {
+        return None;
+    }
+    let child2 = child1.get_next_sibling().unwrap();
+
+    if child1.get_name().eq("mn") && child2.get_name().eq("mn") {
+        //naturally these should both be numbers...
+        let res1 = child1.get_all_content().parse::<f64>();
+        let res2 = child2.get_all_content().parse::<f64>();
+
+        if !res1.is_ok() || !res2.is_ok() {
+            return None;
+        }
+
+        let c1 = res1.unwrap();
+        let c2 = res2.unwrap();
+
+        if child1.get_first_child().is_none() {
+            return None;
+        }
+        return Some(c1.powf(c2).to_string());
+    } else if child1.get_name().eq("mn") && child2.get_name().eq("mrow") {
+        let res1 = child1.get_all_content().parse::<f64>();
+        //check the kids of child2
+        if child2.get_first_child().is_none() {
+            return None;
+        }
+        let kid1 = child2.get_first_child().unwrap();
+        if kid1.get_next_sibling().is_none() {
+            return None;
+        }
+        let kid2 = kid1.get_next_sibling().unwrap();
+
+        if kid1.get_name().eq("mo") && kid1.get_all_content().eq("-") && kid2.get_name().eq("mn") {
+            let res2 = kid2.get_all_content().parse::<f64>();
+            if !res1.is_ok() || !res2.is_ok() {
+                return None;
+            }
+            let c1 = res1.unwrap();
+            let c2 = res2.unwrap();
+
+            if child1.get_first_child().is_none() {
+                return None;
+            }
+            return Some(c1.powf((-1.0) * c2).to_string());
+        }
+    }
+    return None;
 }
 
 pub fn math_ends_with_mn(math_node : Option<Node>) -> Option<f64>{
@@ -112,10 +214,25 @@ pub fn math_ends_with_mn(math_node : Option<Node>) -> Option<f64>{
             }
             return math_ends_with_mn(node.get_first_child());
         },
-        "msub" | "mi" | "mo" | "msup" => math_ends_with_mn(node.get_next_sibling()),
+        "msub" | "mi" | "mo" => math_ends_with_mn(node.get_next_sibling()),
+        "mpadded" => {
+            if node.get_next_sibling().is_some(){
+                return math_ends_with_mn(node.get_next_sibling());
+            }
+            return math_ends_with_mn(node.get_first_child());
+        },
+        "msup" => {
+            let res_msup = calculate_msup(node.clone());
+            if res_msup.is_none(){
+                return math_ends_with_mn(node.get_next_sibling());
+            }
+            let result = res_msup.unwrap().parse::<f64>();
+            return Some(result.unwrap());
+
+        },
         "mn" => {
             if node.get_next_sibling().is_some(){
-                math_ends_with_mn(node.get_next_sibling());
+                return math_ends_with_mn(node.get_next_sibling());
             }
             let content = node.get_all_content().parse::<f64>();
             if content.is_err() {
@@ -140,7 +257,9 @@ pub fn print_document(opt_node : Option<Node>, space : String){
     let more_space = format!("{} ",space);
 
     print_document(node.get_first_child(), more_space);
-    print_document(node.get_next_sibling(), space);
+    if space.len() > 0 {
+        print_document(node.get_next_sibling(), space);
+    }
 
 }
 
@@ -159,19 +278,38 @@ pub fn get_number_prefix_unit_regexp() -> Regex{
         unit_regex = format!("{}|{}", unit_regex, u);
     }
     unit_regex.remove(0);
-    let combined : String = format!(r"({})\s(({})?({})\s?)+(\s|\)|\.|,)",number, prefix_regex, unit_regex);
-    // searches for number (prefix? unit)+ and a final character at the end (whitespace, closing bracket, dot, comma)
+    let combined : String = format!(r"\s({})\s*({})?({})(\s|\)|\.|,)",number, prefix_regex, unit_regex);
+    // searches for number prefix? unit and a final character at the end (whitespace, closing bracket, dot, comma)
+    let combined_regex = Regex::new(&combined).unwrap();
+    combined_regex
+}
+
+pub fn get_range_regexp() -> Regex{
+    let number : String = r"-?\d*\.?\d+".to_string();
+
+    let mut prefix_regex : String = r"".to_string();
+    let mut unit_regex : String = r"".to_string();
+
+    for p in SI_PREFIX{
+        prefix_regex = format!("{}|{}", prefix_regex, p);
+    }
+    prefix_regex.remove(0);
+
+    for u in UNIT_SYMBOLS{
+        unit_regex = format!("{}|{}", unit_regex, u);
+    }
+    unit_regex.remove(0);
+    let combined : String = format!(r"\s({}\s?(-|(to))\s?{})\s*({})?({})\s?(\s|\)|\.|,)",number, number, prefix_regex, unit_regex);
+    //searches for ranges in text, i.e. 70 - 100 MeV
     let combined_regex = Regex::new(&combined).unwrap();
     combined_regex
 }
 
 
-pub fn evaluate_text(document : &mut Document){
-    // let simple_pattern : P<'static, &'static str, &'static str> = P::W("GeV");
 
+pub fn evaluate_text(document : &mut Document){
     for sentence in document.sentence_iter(){
         let ref text = sentence.range.dnm.plaintext;
-
         let combined_regex = get_number_prefix_unit_regexp();
 
         for cap in combined_regex.captures_iter(text){
@@ -179,25 +317,24 @@ pub fn evaluate_text(document : &mut Document){
             let res_len = res.len();
             res.truncate(res_len - 1);
 
-            println!("{}",res);
+            println!("Unit in text: {}",res);
         }
 
+        let range_regex = get_range_regexp();
 
-        //for res in text.matches("[0-9] GeV"){
-        //    println!("{}", res);
-       // }
+        for cap in range_regex.captures_iter(text){
 
+            let mut res = cap.at(0).unwrap_or("").to_string();
+            let res_len = res.len();
+            res.truncate(res_len - 1);
+
+            println!("Range in text: {}",res);
+        }
         break;
-
-
     }
 }
 
 pub fn evaluate_math(document : &mut Document) {
-    //let xpath_context = Context::new(&document.dom).unwrap();
-
-    //println!("path {}",document.path);
-
     let ref context = document.xpath_context;
 
     let res = context.evaluate("//math");
@@ -215,13 +352,6 @@ pub fn evaluate_math(document : &mut Document) {
 
     for node in res_vec{
 
-        let pattern1 : [&str; 3] = ["mn","mo","mtext"];
-        let pattern2 : [&str; 5] = ["mn", "mo", "mi", "mo", "mtext"];
-        let pattern3 : [&str; 11] = ["mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi"];
-
-
-        // pattern_spotter(Some(node.clone()),&pattern2, &mut vec2, check_result_pattern2);
-
         let mut leafs = Vec::new();
         leafs = leafs_of_math_tree(Some(node.clone()), leafs);
 
@@ -232,9 +362,18 @@ pub fn evaluate_math(document : &mut Document) {
             }
         }
 
+        let pattern1 : [&str; 3] = ["mn","mo","mtext"];
+        let pattern2 : [&str; 5] = ["mn", "mo", "mi", "mo", "mtext"];
+        let pattern3 : [&str; 11] = ["mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi"];
+        let pattern4 : [&str; 12] = ["mn", "mo", "mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo"];
+
         pattern_spotter_leafs(&leafs, &pattern1, &mut Vec::new(), check_result_pattern1);
         pattern_spotter_leafs(&leafs, &pattern2, &mut Vec::new(), check_result_pattern2);
         pattern_spotter_leafs(&leafs, &pattern3, &mut Vec::new(), check_result_pattern3);
+        pattern_spotter_leafs(&leafs, &pattern4, &mut Vec::new(), check_result_pattern4);
+
+        find_degree(&leafs);
+
 
         if DEBUG {
             println!("");
@@ -262,68 +401,14 @@ pub fn leafs_of_math_tree (opt_node : Option<Node>, mut res : Vec<Node>) -> Vec<
             return leafs_of_math_tree(node.get_next_sibling(), res);
         },
         "msup" => {
-            //if both children are of type mn, then return the result of the power operation in the form of an mn node
-            //alternatively if child1 : mn and child2 : mrow
-            //with child2 having again 2 kids, one of type mo (with content -) and one of mn
-            //then compute also compute the result of the operation
-            if node.get_first_child().is_none() {
-                return res;
-            }
-            let child1 = node.get_first_child().unwrap();
-            if child1.get_next_sibling().is_none() {
-                return res;
-            }
-            let child2 = child1.get_next_sibling().unwrap();
-
-            if child1.get_name().eq("mn") && child2.get_name().eq("mn"){
-               //naturally these should both be numbers...
-                let res1 = child1.get_all_content().parse::<f64>();
-                let res2 = child2.get_all_content().parse::<f64>();
-
-                if !res1.is_ok() || !res2.is_ok(){
-                    return res;
-                }
-
-                let c1 = res1.unwrap();
-                let c2 = res2.unwrap();
-
-                if child1.get_first_child().is_none() {
-                    return res;
-                }
-                child1.get_first_child().unwrap().set_content(&c1.powf(c2).to_string());
-          //      println!("replaced {} ^ {} by  {}", c1, c2, c1.powf(c2));
-                res.push(child1.clone());
-            }else if child1.get_name().eq("mn") && child2.get_name().eq("mrow"){
-                let res1 = child1.get_all_content().parse::<f64>();
-                //check the kids of child2
-                if child2.get_first_child().is_none() {
-                    return res;
-                }
-                let kid1 = child2.get_first_child().unwrap();
-                if kid1.get_next_sibling().is_none() {
-                    return res;
-                }
-                let kid2 = kid1.get_next_sibling().unwrap();
-
-                if kid1.get_name().eq("mo") && kid1.get_all_content().eq("-") && kid2.get_name().eq("mn"){
-                    let res2 = kid2.get_all_content().parse::<f64>();
-                    if !res1.is_ok() || !res2.is_ok(){
-                        return res;
-                    }
-                    let c1 = res1.unwrap();
-                    let c2 = res2.unwrap();
-
-                    if child1.get_first_child().is_none() {
-                        return res;
-                    }
-                    child1.get_first_child().unwrap().set_content(&c1.powf((-1.0)*c2).to_string());
-                    //     println!("replaced {} ^ {} by  {}", c1, (-1.0 *c2), c1.powf((-1.0)*c2));
-                    res.push(child1.clone());
-                }
-            }else{
+            let msup_res = calculate_msup(node.clone());
+            if msup_res.is_none() {
                 res.push(node.clone());
+            }else {
+                let child = node.get_first_child().unwrap();
+                child.set_content(&msup_res.unwrap());
+                res.push(child);
             }
-
             return leafs_of_math_tree(node.get_next_sibling(), res);
 
         },
@@ -358,10 +443,13 @@ pub fn pattern_spotter_leafs <'a> (leafs : &'a[Node], pattern : &'a[&str], res :
         return;
     }
 
-    let life_time_prob = leafs[0].get_first_child().unwrap();
+    let life_time_prob = if leafs[0].get_first_child().is_some() {leafs[0].get_first_child().unwrap()} else {leafs[0].clone()};
+
     let mut exp : f64 = 1.0;
     let ref head;
-    if leafs[0].get_name().eq("msup") {
+
+    //search for an exponent
+    if leafs[0].get_first_child().is_some() && leafs[0].get_name().eq("msup") {
         if leafs[0].get_first_child().is_none() {
             return;
         }
@@ -449,6 +537,8 @@ pub fn check_result_pattern1(vec : &Vec<PossQE>){
         return;
     }
 
+    println!("pattern1 found {}\n", string);
+
     add_qe_to_kat(vec);
 
     return;
@@ -470,6 +560,8 @@ pub fn check_result_pattern2(vec : &Vec<PossQE>) {
         return;
     }
 
+    println!("pattern2 found {}\n", string);
+
     add_qe_to_kat(vec);
 
     return;
@@ -485,7 +577,7 @@ pub fn check_result_pattern3(vec : &Vec<PossQE>){
     while i < vec.len(){
         if !vec[i].node_content.eq(INV_TIMES) {
             if DEBUG {
-                println!("{} is not valid for pattern1", string);
+                println!("{} is not valid for pattern3", string);
             }
             return;
         }
@@ -495,12 +587,53 @@ pub fn check_result_pattern3(vec : &Vec<PossQE>){
         i = i + 2;
     }
 
-    //println!("{}", string);
-    //println!("pattern 3 constructs {}", s);
+    if !check_unit_string(&s, vec){
+        return;
+    }
+
+    println!("pattern3 found {}\n", string);
+
+    add_qe_to_kat(vec);
+
+    return;
+
+}
+
+pub fn check_result_pattern4(vec : &Vec<PossQE>){
+    let string = poss_qe_to_string(&vec);
+
+    if vec.len() < 4{
+        return;
+    }
+
+    if !vec[1].node_content.eq("-"){
+        if DEBUG {
+            println!("pattern4, not a minus on second position; {} instead", vec[1].node_content);
+        }
+        return;
+    }
+
+    let mut i = 3;
+    let mut s = String::new();
+    while i < vec.len(){
+        if !vec[i].node_content.eq(INV_TIMES) {
+            if DEBUG {
+                println!("{} is not valid for pattern4", string);
+            }
+            return;
+        }
+        if i+1 < vec.len() {
+            s.push_str(&vec[i+1].node_content)
+        }
+        i = i + 2;
+    }
 
     if !check_unit_string(&s, vec){
         return;
     }
+
+    println!("pattern4 found range {}\n",string);
+
 
     add_qe_to_kat(vec);
 
@@ -509,10 +642,63 @@ pub fn check_result_pattern3(vec : &Vec<PossQE>){
 }
 
 
+pub fn find_degree (leafs : &[Node]){
+    if leafs.len() == 0{
+        return;
+    }
+
+    if leafs[0].get_name().eq("msup"){
+        if leafs[0].get_first_child().is_none(){
+            return;
+        }
+        let child1 = leafs[0].get_first_child().unwrap();
+        if child1.get_next_sibling().is_none(){
+            return;
+        }
+        let child2 = child1.get_next_sibling().unwrap();
+
+        if child1.get_name().eq("mn") && child2.get_name().eq("mo") && child2.get_all_content().eq("∘"){ //"\u{00B0}"){
+
+            let text = format!("{} \u{00B0}", child1.get_all_content());
+
+            // degree found, but continue to check, whether it is followed by C, resulting in degree Celsius
+            let opt_sib1 = leafs[0].get_next_sibling();
+            let mut found_c = false;
+            if opt_sib1.is_some(){
+                let sib1 = opt_sib1.unwrap();
+                let opt_sib2 = sib1.get_next_sibling();
+                if opt_sib2.is_some(){
+                    let sib2 = opt_sib2.unwrap();
+
+                    if sib1.get_name().eq("mo") && sib1.get_all_content().eq(INV_TIMES) && sib2.get_name().eq("mi") && sib2.get_all_content().eq("C"){
+                        found_c = true;
+                        let new_text = format!("{}C",text);
+                        let new_poss_qe = PossQE { node_name : "msup".to_string() , node_id: leafs[0].get_property("id").unwrap(),
+                            node_content: new_text.clone(), exp: 1.0 };
+                        println!("find_degree found {}", new_text);
+                        add_qe_to_kat(&[new_poss_qe]);
+                    }
+                }
+            }
+
+            if !found_c{
+                let poss_qe = PossQE { node_name : "msup".to_string() , node_id: leafs[0].get_property("id").unwrap(),
+                    node_content: text.clone(), exp: 1.0 };
+                println!("find_degree found {}", text);
+                add_qe_to_kat(&[poss_qe]);
+
+            }
+
+        }
+
+    }
+
+    find_degree(&leafs[1..]);
+
+}
+
+
 pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool{
-
-
-
 
     let mut unit = "";
     let mut prefix = "";
@@ -553,9 +739,9 @@ pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool{
 
     if poss_unit.eq(&(prefix.to_string()+unit)) {
         println!("string {} consists of prefix {} and unit {} with exp {}", poss_unit, prefix, unit, exp);
-        println!("QE {}", poss_qe_to_string(vec));
     }else{
-        println!("Could not disassemble {}", poss_qe_to_string(vec));
+        println!("Could not disassemble {}\n", poss_qe_to_string(vec));
+        return false;
     }
 
 
