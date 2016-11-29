@@ -42,16 +42,24 @@ pub struct PossQE {
     pub exp : f64,
 }
 
+pub fn is_times_symbol(s : String) -> bool {
+    return s.eq("×") || s.eq(INV_TIMES) || s.eq("⋅");
+}
+
 pub fn first_try(document : &mut Document) {
+
+    create_kat_annotations_header();
 
     for p in document.paragraph_iter(){
         let root = p.dnm.root_node;
- //       print_document(Some(root.clone()), String::new());
+        print_document(Some(root.clone()), String::new());
         pre_process(Some(root), true);
     }
 
     evaluate_text(document);
-    evaluate_math(document);
+    //evaluate_math(document);
+
+    end_kat_document();
 
     /*
     let opt_dnm = document.dnm;
@@ -74,12 +82,49 @@ pub fn pre_process(opt_node : Option<Node>, start : bool){
     // if the math node ends with a number i.e. $R = 5$, then copy that number to the following text, s.t.
     // one can detect $R = 5$ kg as $R = 5$ 5 kg.
     if node.get_name().eq("math"){
+
         let mut leafs = Vec::new();
         leafs = leafs_of_math_tree(Some(node.clone()), leafs);
+
+        //resolve times expressions to a single <mn> node
+        loop{
+            let new_leafs = Vec::from(resolve_times(&mut leafs.clone()));
+            if new_leafs.len() == leafs.len(){
+                leafs = new_leafs;
+                break;
+            }else{
+                leafs = new_leafs;
+            }
+        }
+        println!("LEAF ");
+        for leaf in leafs.clone(){
+            if leaf.get_name().eq("msup"){
+                println!("msup");
+                let mut child = leaf.get_first_child();
+                while child.is_some(){
+                    let unwr = child.unwrap();
+                    println!("\t {} {}", unwr.get_name(), unwr.get_all_content());
+                    child = unwr.get_next_sibling();
+                }
+
+            }else {
+                println!("{} {}", leaf.get_name(), leaf.get_all_content());
+            }
+        }
+
+        print!("MATH ");
+        for leaf in leafs.clone(){
+            print!("{}",leaf.get_all_content())
+        }
+        println!(" ");
+        println!(" ");
+
         let len = leafs.len();
+
         if len > 0 {
             //check if leafs ends with mn mo mn
-            // where mo is +-
+            // where mo = +-, hence e.g. 5 +- 1
+            // in this case, detect a range (4 to 6)
             if len >= 3 && leafs[len-3].get_name().eq("mn") && leafs[len-2].get_name().eq("mo") &&
                 leafs[len-1].get_name().eq("mn") && leafs[len-2].get_all_content().eq("±") {
 
@@ -98,9 +143,9 @@ pub fn pre_process(opt_node : Option<Node>, start : bool){
                 let new_content = format!("{} to {}", range_min, range_max);
                 prefix_node_content(node.get_next_sibling(), &new_content);
 
+                //see if the formula ends with +- mn, if so detect a range. e.g. +-1 -> -1 to +1
             }else if len >= 2 && leafs[len-1].get_name().eq("mn") && leafs[len-2].get_name().eq("mo") &&
                     leafs[len-2].get_all_content().eq("±"){
-                // leafs ends with mo mn, where mo is +-
                 let number_res = leafs[len-1].get_all_content().parse::<f64>();
 
                 if number_res.is_err(){
@@ -112,12 +157,22 @@ pub fn pre_process(opt_node : Option<Node>, start : bool){
                 let new_content = format!("{} to {}", -number, number);
                 prefix_node_content(node.get_next_sibling(), &new_content);
 
+                //if the last node is a number (mn), copy it to the following text, s.t.
+                // a unit can be detected, if the unit symbol is in text only.
+                // also detects e.g. 10^10, since this is automatically resolved to one number (mn)
             }else if leafs[len-1].get_name().eq("mn") {
-                // last is mn
                 let number = leafs[len - 1].get_all_content();
                 prefix_node_content(node.get_next_sibling(), &number);
+            }else if len == 1 && leafs[0].get_name().eq("msup"){
+                //replace cm$^2$ by a pure textual representation, i.e. cm^2
+                let child1 = leafs[0].get_first_child().unwrap();
+                let child2 = child1.get_next_sibling().unwrap();
+                //TODO continue here, write an generic function that returns the exponent of msup first
+
             }
         }
+
+        evaluate_math(leafs.clone());
     }
 
     pre_process(node.get_first_child(), false);
@@ -125,6 +180,27 @@ pub fn pre_process(opt_node : Option<Node>, start : bool){
         pre_process(node.get_next_sibling(), false);
     }
 
+
+}
+
+//resolves mn mo mn, where mo is a times symbol to only one mn node with the result of the operation
+pub fn resolve_times(leafs : &mut Vec<Node>) -> &[Node]{
+    let len = leafs.len();
+    for i in 0..len{
+        if leafs[i].get_name().eq("mn") && i+2 < len && leafs[i+1].get_name().eq("mo") &&
+            is_times_symbol(leafs[i+1].get_all_content()) && leafs[i+2].get_name().eq("mn"){
+            let number1 = leafs[i].get_all_content().parse::<f64>().unwrap();
+            let number2 = leafs[i+2].get_all_content().parse::<f64>().unwrap();
+            let res_as_str = (number1 * number2).to_string();
+            leafs[i].set_content(&res_as_str);
+            leafs.remove(i+1);
+            leafs.remove(i+1);
+            //println!("{} times {} replaced by {}", number1, number2, res_as_str);
+            return leafs.as_slice();
+        }
+
+    }
+    return leafs.as_slice();
 
 }
 
@@ -198,7 +274,7 @@ pub fn calculate_msup(msup_node : Node) -> Option<String> {
     }
     return None;
 }
-
+/*
 pub fn math_ends_with_mn(math_node : Option<Node>) -> Option<f64>{
     if math_node.is_none(){
         return None;
@@ -243,7 +319,7 @@ pub fn math_ends_with_mn(math_node : Option<Node>) -> Option<f64>{
         _ => None,
     }
 }
-
+*/
 
 pub fn print_document(opt_node : Option<Node>, space : String){
     if opt_node.is_none(){
@@ -309,13 +385,22 @@ pub fn get_range_regexp() -> Regex{
 
 pub fn evaluate_text(document : &mut Document){
     for sentence in document.sentence_iter(){
-        let ref text = sentence.range.dnm.plaintext;
+        let ref old_text = sentence.range.dnm.plaintext;
+
+        //remove all the MathFormula words from the text
+        let mathformula_regex = Regex::new(r"MathFormula").unwrap();
+        let text = mathformula_regex.replace_all(old_text," ");
+
+
         let combined_regex = get_number_prefix_unit_regexp();
+
 
         for cap in combined_regex.captures_iter(text){
             let mut res = cap.at(0).unwrap_or("").to_string();
             let res_len = res.len();
             res.truncate(res_len - 1);
+
+
 
             println!("Unit in text: {}",res);
         }
@@ -334,6 +419,33 @@ pub fn evaluate_text(document : &mut Document){
     }
 }
 
+pub fn evaluate_math(leafs : Vec<Node>) {
+        for leaf in leafs.clone(){
+            if DEBUG {
+                println!("{} {}", leaf.get_name(), leaf.get_all_content());
+            }
+        }
+
+        let pattern1 : [&str; 3] = ["mn","mo","mtext"];
+        let pattern2 : [&str; 5] = ["mn", "mo", "mi", "mo", "mtext"];
+        let pattern3 : [&str; 11] = ["mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi"];
+        let pattern4 : [&str; 12] = ["mn", "mo", "mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo"];
+
+        pattern_spotter_leafs(&leafs, &pattern1, &mut Vec::new(), check_result_pattern1);
+        pattern_spotter_leafs(&leafs, &pattern2, &mut Vec::new(), check_result_pattern2);
+        pattern_spotter_leafs(&leafs, &pattern3, &mut Vec::new(), check_result_pattern3);
+        pattern_spotter_leafs(&leafs, &pattern4, &mut Vec::new(), check_result_pattern4);
+
+        find_degree(&leafs);
+
+
+        if DEBUG {
+            println!("");
+        }
+}
+
+
+/*
 pub fn evaluate_math(document : &mut Document) {
     let ref context = document.xpath_context;
 
@@ -384,6 +496,7 @@ pub fn evaluate_math(document : &mut Document) {
     end_kat_document();
 
 }
+*/
 
 pub fn leafs_of_math_tree (opt_node : Option<Node>, mut res : Vec<Node>) -> Vec<Node>{
     if opt_node.is_none(){
@@ -392,7 +505,7 @@ pub fn leafs_of_math_tree (opt_node : Option<Node>, mut res : Vec<Node>) -> Vec<
     let node : Node = opt_node.unwrap();
 
     match &node.get_name() as &str{
-        "mrow" | "mpadded" | "math" | "semantics" =>{
+        "mrow" | "mpadded" | "math" | "semantics" | "mstyle" =>{
             res = leafs_of_math_tree(node.get_first_child(), res);
             return leafs_of_math_tree(node.get_next_sibling(), res);
         },
@@ -424,8 +537,17 @@ pub fn leafs_of_math_tree (opt_node : Option<Node>, mut res : Vec<Node>) -> Vec<
             res.push(child1.clone());
 
             return leafs_of_math_tree(node.get_next_sibling(), res);
-
-        }
+        },
+        "msubsup" => {
+            //create a new msup node and do the same hack as for msub
+            // need a link to the  document here for that
+           /* let new_doc = libxml::tree::Document::new().unwrap();
+            let new_node = Node::new("msup", None, &new_doc).unwrap();
+            node.add
+            new_node.add
+            */
+            return leafs_of_math_tree(node.get_next_sibling(), res);
+        },
         _ => return res,
     }
 }
@@ -698,7 +820,31 @@ pub fn find_degree (leafs : &[Node]){
 }
 
 
-pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool{
+pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool {
+
+    let mut parts : Vec<&[PossQE]> = Vec::new();
+    let mut last_ind = 0;
+    for i in 0..vec.len(){
+        let ref possqe = vec[i];
+        if possqe.node_content.eq("/") || possqe.node_content.eq("×"){
+            parts.push(&vec[last_ind..i]);
+            last_ind = i+1;
+        }
+    }
+
+    for part in parts{
+        println!("TEST {}", poss_qe_to_string(part));
+    }
+
+    let temp = check_single_unit_string(poss_unit, vec);
+    if temp.is_some() {
+        return true;
+    }
+    return false;
+}
+
+
+pub fn check_single_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> Option<(String, String, f64)>{
 
     let mut unit = "";
     let mut prefix = "";
@@ -712,7 +858,7 @@ pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool{
     }
 
     if unit == "" {
-        return false;
+        return None;
     }
 
     let fst_part = poss_unit.split_at(poss_unit.len()-unit.len()).0;
@@ -741,11 +887,10 @@ pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool{
         println!("string {} consists of prefix {} and unit {} with exp {}", poss_unit, prefix, unit, exp);
     }else{
         println!("Could not disassemble {}\n", poss_qe_to_string(vec));
-        return false;
+        return None;
     }
 
-
-    return true;
+    return Some((prefix.to_string(), unit.to_string(), exp));
 }
 
 
