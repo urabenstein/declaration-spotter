@@ -22,8 +22,8 @@ pub fn main() {
     */
 
     let args : Vec<_> = env::args().collect();
-    let mut document = corpus.load_doc(args[1].to_owned()).unwrap();
-    first_try(&mut document);
+    let mut document = corpus.load_doc(args[2].to_owned()).unwrap();
+    first_try(args[1].to_owned(), &mut document);
 
     //
 

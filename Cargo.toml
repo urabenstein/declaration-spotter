@@ -7,6 +7,10 @@ authors = ["jfschaefer <j.schaefer@jacobs-university.de>"]
 name = "spotter"
 crate-type = ["rlib", "dylib", "staticlib"]
 
+[[bin]]
+name = "spotter"
+path = "examples/simple_kat_export.rs"
+
 [dependencies]
 regex = "0.1"
 [dependencies.libxml]

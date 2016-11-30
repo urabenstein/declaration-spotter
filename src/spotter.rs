@@ -46,17 +46,24 @@ pub fn is_times_symbol(s : String) -> bool {
     return s.eq("×") || s.eq(INV_TIMES) || s.eq("⋅");
 }
 
-pub fn first_try(document : &mut Document) {
+pub fn first_try(status : String, document : &mut Document) {
 
     create_kat_annotations_header();
 
     for p in document.paragraph_iter(){
         let root = p.dnm.root_node;
-        print_document(Some(root.clone()), String::new());
-        pre_process(Some(root), true);
+        if status.eq("nodes"){
+            print_document(Some(root.clone()), String::new());
+            continue;
+        }
+        pre_process(Some(root), true, status.clone());
     }
 
-    evaluate_text(document);
+    if status.eq("nodes"){
+        return;
+    }
+
+    evaluate_text(document, status.clone());
     //evaluate_math(document);
 
     end_kat_document();
@@ -73,7 +80,7 @@ pub fn first_try(document : &mut Document) {
     */
 }
 
-pub fn pre_process(opt_node : Option<Node>, start : bool){
+pub fn pre_process(opt_node : Option<Node>, start : bool, status : String){
     if opt_node.is_none(){
         return;
     }
@@ -96,6 +103,8 @@ pub fn pre_process(opt_node : Option<Node>, start : bool){
                 leafs = new_leafs;
             }
         }
+
+        /*
         println!("LEAF ");
         for leaf in leafs.clone(){
             if leaf.get_name().eq("msup"){
@@ -118,6 +127,7 @@ pub fn pre_process(opt_node : Option<Node>, start : bool){
         }
         println!(" ");
         println!(" ");
+        */
 
         let len = leafs.len();
 
@@ -165,19 +175,24 @@ pub fn pre_process(opt_node : Option<Node>, start : bool){
                 prefix_node_content(node.get_next_sibling(), &number);
             }else if len == 1 && leafs[0].get_name().eq("msup"){
                 //replace cm$^2$ by a pure textual representation, i.e. cm^2
-                let child1 = leafs[0].get_first_child().unwrap();
-                let child2 = child1.get_next_sibling().unwrap();
-                //TODO continue here, write an generic function that returns the exponent of msup first
-
+                let base_exp = msup_base_exp(leafs[0].clone());
+                if base_exp.is_some(){
+                    let be = base_exp.unwrap();
+                    if be.0.eq(""){
+                        let prefix = format!("^({})", be.1);
+                        prefix_node_content(node.get_next_sibling(), &prefix);
+                    }
+                }
             }
         }
-
-        evaluate_math(leafs.clone());
+        if !status.eq("text") {
+            evaluate_math(leafs.clone());
+        }
     }
 
-    pre_process(node.get_first_child(), false);
+    pre_process(node.get_first_child(), false, status.clone());
     if !start {
-        pre_process(node.get_next_sibling(), false);
+        pre_process(node.get_next_sibling(), false, status.clone());
     }
 
 
@@ -216,11 +231,8 @@ pub fn prefix_node_content(opt_node : Option<Node>, prefix : &str){
 
 }
 
-pub fn calculate_msup(msup_node : Node) -> Option<String> {
-    //if both children are of type mn, then return the result of the power operation in the form of an mn node
-    //alternatively if child1 : mn and child2 : mrow
-    //with child2 having again 2 kids, one of type mo (with content -) and one of mn
-    //then compute also compute the result of the operation
+//return the base and the exponent of a msup node
+pub fn msup_base_exp(msup_node : Node) -> Option<(String, String)> {
     if msup_node.get_first_child().is_none() {
         return None;
     }
@@ -230,24 +242,10 @@ pub fn calculate_msup(msup_node : Node) -> Option<String> {
     }
     let child2 = child1.get_next_sibling().unwrap();
 
-    if child1.get_name().eq("mn") && child2.get_name().eq("mn") {
-        //naturally these should both be numbers...
-        let res1 = child1.get_all_content().parse::<f64>();
-        let res2 = child2.get_all_content().parse::<f64>();
+    let base = child1.get_all_content();
+    let mut exp = String::new();
 
-        if !res1.is_ok() || !res2.is_ok() {
-            return None;
-        }
-
-        let c1 = res1.unwrap();
-        let c2 = res2.unwrap();
-
-        if child1.get_first_child().is_none() {
-            return None;
-        }
-        return Some(c1.powf(c2).to_string());
-    } else if child1.get_name().eq("mn") && child2.get_name().eq("mrow") {
-        let res1 = child1.get_all_content().parse::<f64>();
+    if child2.get_name().eq("mrow") {
         //check the kids of child2
         if child2.get_first_child().is_none() {
             return None;
@@ -259,67 +257,32 @@ pub fn calculate_msup(msup_node : Node) -> Option<String> {
         let kid2 = kid1.get_next_sibling().unwrap();
 
         if kid1.get_name().eq("mo") && kid1.get_all_content().eq("-") && kid2.get_name().eq("mn") {
-            let res2 = kid2.get_all_content().parse::<f64>();
-            if !res1.is_ok() || !res2.is_ok() {
-                return None;
-            }
-            let c1 = res1.unwrap();
-            let c2 = res2.unwrap();
-
-            if child1.get_first_child().is_none() {
-                return None;
-            }
-            return Some(c1.powf((-1.0) * c2).to_string());
+            exp.push_str("-"); exp.push_str(&kid2.get_all_content());
         }
+    }else{
+        exp.push_str(&child2.get_all_content());
     }
-    return None;
+    return Some((base,exp));
 }
-/*
-pub fn math_ends_with_mn(math_node : Option<Node>) -> Option<f64>{
-    if math_node.is_none(){
+
+
+pub fn calculate_msup(msup_node : Node) -> Option<String> {
+    let base_exp = msup_base_exp(msup_node);
+    if base_exp.is_none(){
         return None;
     }
-    let node = math_node.unwrap();
 
-    match &node.get_name() as &str{
-        "math" | "semantics" => math_ends_with_mn(node.get_first_child()),
-        "mrow" => {
-            let sib = node.get_next_sibling();
-            if sib.is_some() && sib.unwrap().get_name().eq("mrow") {
-                return math_ends_with_mn(node.get_next_sibling());
-            }
-            return math_ends_with_mn(node.get_first_child());
-        },
-        "msub" | "mi" | "mo" => math_ends_with_mn(node.get_next_sibling()),
-        "mpadded" => {
-            if node.get_next_sibling().is_some(){
-                return math_ends_with_mn(node.get_next_sibling());
-            }
-            return math_ends_with_mn(node.get_first_child());
-        },
-        "msup" => {
-            let res_msup = calculate_msup(node.clone());
-            if res_msup.is_none(){
-                return math_ends_with_mn(node.get_next_sibling());
-            }
-            let result = res_msup.unwrap().parse::<f64>();
-            return Some(result.unwrap());
+    let b_e = base_exp.unwrap();
 
-        },
-        "mn" => {
-            if node.get_next_sibling().is_some(){
-                return math_ends_with_mn(node.get_next_sibling());
-            }
-            let content = node.get_all_content().parse::<f64>();
-            if content.is_err() {
-                return None;
-            }
-            return Some(content.unwrap());
-        },
-        _ => None,
+    let base = b_e.0.parse::<f64>();
+    let exp  = b_e.1.parse::<f64>();
+
+    if base.is_err() || exp.is_err(){
+        return None;
     }
+    return Some(base.unwrap().powf(exp.unwrap()).to_string());
 }
-*/
+
 
 pub fn print_document(opt_node : Option<Node>, space : String){
     if opt_node.is_none(){
@@ -339,9 +302,11 @@ pub fn print_document(opt_node : Option<Node>, space : String){
 
 }
 
-pub fn get_number_prefix_unit_regexp() -> Regex{
-    let number : String = r"\d*\.?\d+".to_string();
+pub fn get_number_regex_string() -> String{
+    return r"\d*\.?\d+".to_string();
+}
 
+pub fn get_number_prefix_unit_regexp() -> Regex{
     let mut prefix_regex : String = r"".to_string();
     let mut unit_regex : String = r"".to_string();
 
@@ -354,7 +319,7 @@ pub fn get_number_prefix_unit_regexp() -> Regex{
         unit_regex = format!("{}|{}", unit_regex, u);
     }
     unit_regex.remove(0);
-    let combined : String = format!(r"\s({})\s*({})?({})(\s|\)|\.|,)",number, prefix_regex, unit_regex);
+    let combined : String = format!(r"\s({})\s*({})?({})(\s|\)|\.|,)",get_number_regex_string() , prefix_regex, unit_regex);
     // searches for number prefix? unit and a final character at the end (whitespace, closing bracket, dot, comma)
     let combined_regex = Regex::new(&combined).unwrap();
     combined_regex
@@ -383,31 +348,75 @@ pub fn get_range_regexp() -> Regex{
 
 
 
-pub fn evaluate_text(document : &mut Document){
+pub fn evaluate_text(document : &mut Document, status : String){
     for sentence in document.sentence_iter(){
         let ref old_text = sentence.range.dnm.plaintext;
 
         //remove all the MathFormula words from the text
-        let mathformula_regex = Regex::new(r"MathFormula").unwrap();
-        let text = mathformula_regex.replace_all(old_text," ");
+      //  let mathformula_regex = Regex::new(r"MathFormula").unwrap();
+        //let mut text = &mathformula_regex.replace_all(old_text," ");
+        let mut text = old_text.replace("MathFormula","");
 
+        //search for number^(number) expressions and replace them by their result
+        let number_power_string = format!(r"({})\s* \^\(({})\)",get_number_regex_string(), get_number_regex_string());
+        println!("STRING {}", number_power_string);
+        let number_power_regex = Regex::new(&number_power_string).unwrap();
+
+        /*
+        text = &number_power_regex.replace_all(&text.clone(), |caps: &Captures| {
+            let base = caps.at(1).unwrap();
+            let exp  = caps.at(2).unwrap();
+            let basef = base.parse::<f64>().unwrap();
+            let expf  = exp.parse::<f64>().unwrap();
+            let res = basef.powf(expf).to_string();
+            return res; //format!("{}", caps.at(1).unwrap().parse::<f64>().unwrap().powf(caps.at(2).unwrap().parse::<f64>().unwrap()));
+        });*/
+
+        for cap in number_power_regex.captures_iter(&text.clone()){
+            //println!("Base: {}", cap.at(1).unwrap_or(""));
+            //println!("Exp: {}", cap.at(2).unwrap_or(""));
+            if cap.at(1).is_none() && cap.at(2).is_none(){
+                continue;
+            }
+            let base = cap.at(1).unwrap();
+            let exp  = cap.at(2).unwrap();
+            let basef = base.parse::<f64>().unwrap();
+            let expf  = exp.parse::<f64>().unwrap();
+            let res = basef.powf(expf).to_string();
+            //text = text.replace(cap.at(0).unwrap(),&res);
+            // TODO error here
+
+            println!("Total: {} |Base: {} |Exp: {} | Res: {}",cap.at(0).unwrap(), base, exp, res);
+        }
 
         let combined_regex = get_number_prefix_unit_regexp();
 
+        if status.eq("text"){
+            println!("{}", text);
+            return;
+        }
 
-        for cap in combined_regex.captures_iter(text){
+        for cap in combined_regex.captures_iter(&text){
             let mut res = cap.at(0).unwrap_or("").to_string();
             let res_len = res.len();
             res.truncate(res_len - 1);
 
-
-
             println!("Unit in text: {}",res);
+
+            unsafe {
+                let pos = cap.pos(0).unwrap();
+                let offset = 15;
+                if pos.0 - offset > 0 && pos.1 + offset < text.len() {
+                    println!("Context: {} \n", text.as_str().slice_unchecked(pos.0 - offset, pos.1 + offset));
+                }
+            }
+
+
         }
 
         let range_regex = get_range_regexp();
 
-        for cap in range_regex.captures_iter(text){
+        for cap in range_regex.captures_iter(&text){
 
             let mut res = cap.at(0).unwrap_or("").to_string();
             let res_len = res.len();
@@ -505,7 +514,10 @@ pub fn leafs_of_math_tree (opt_node : Option<Node>, mut res : Vec<Node>) -> Vec<
     let node : Node = opt_node.unwrap();
 
     match &node.get_name() as &str{
-        "mrow" | "mpadded" | "math" | "semantics" | "mstyle" =>{
+        "math" => {
+          return leafs_of_math_tree(node.get_first_child(), res);
+        },
+        "mrow" | "mpadded" | "semantics" | "mstyle" =>{
             res = leafs_of_math_tree(node.get_first_child(), res);
             return leafs_of_math_tree(node.get_next_sibling(), res);
         },
