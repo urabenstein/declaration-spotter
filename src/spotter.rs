@@ -355,26 +355,14 @@ pub fn evaluate_text(document : &mut Document, status : String){
         //remove all the MathFormula words from the text
       //  let mathformula_regex = Regex::new(r"MathFormula").unwrap();
         //let mut text = &mathformula_regex.replace_all(old_text," ");
-        let mut text = old_text.replace("MathFormula","");
+        let mut text = old_text.replace("MathFormula"," ");
 
         //search for number^(number) expressions and replace them by their result
         let number_power_string = format!(r"({})\s* \^\(({})\)",get_number_regex_string(), get_number_regex_string());
         println!("STRING {}", number_power_string);
         let number_power_regex = Regex::new(&number_power_string).unwrap();
 
-        /*
-        text = &number_power_regex.replace_all(&text.clone(), |caps: &Captures| {
-            let base = caps.at(1).unwrap();
-            let exp  = caps.at(2).unwrap();
-            let basef = base.parse::<f64>().unwrap();
-            let expf  = exp.parse::<f64>().unwrap();
-            let res = basef.powf(expf).to_string();
-            return res; //format!("{}", caps.at(1).unwrap().parse::<f64>().unwrap().powf(caps.at(2).unwrap().parse::<f64>().unwrap()));
-        });*/
-
         for cap in number_power_regex.captures_iter(&text.clone()){
-            //println!("Base: {}", cap.at(1).unwrap_or(""));
-            //println!("Exp: {}", cap.at(2).unwrap_or(""));
             if cap.at(1).is_none() && cap.at(2).is_none(){
                 continue;
             }
@@ -383,10 +371,9 @@ pub fn evaluate_text(document : &mut Document, status : String){
             let basef = base.parse::<f64>().unwrap();
             let expf  = exp.parse::<f64>().unwrap();
             let res = basef.powf(expf).to_string();
-            //text = text.replace(cap.at(0).unwrap(),&res);
-            // TODO error here
+            text = text.replace(cap.at(0).unwrap(),&res);
 
-            println!("Total: {} |Base: {} |Exp: {} | Res: {}",cap.at(0).unwrap(), base, exp, res);
+            //println!("Total: {} |Base: {} |Exp: {} | Res: {}",cap.at(0).unwrap(), base, exp, res);
         }
 
         let combined_regex = get_number_prefix_unit_regexp();
