@@ -80,6 +80,16 @@ pub fn first_try(status : String, document : &mut Document) {
     */
 }
 
+/* Performs a number simplifying steps on the math nodes, by looking at their "leafs" (cmp. leafs_of_math_tree):
+    - times expressions (i.e. 5 x 1000) are resolved to a single <mn> node
+    - for expressions ending with i.e. 5 ± 1 or  ± 1 , this is recognized as a range and put into the following text node
+        as "4 to 6" or "-1 to 1"
+    - for expressions ending with number ("$x = 4$"), the number is copied to the following text
+    - for math expressions consisting only of empty msup nodes ("{}^{10}"), the exponent is also copied to the following
+      text as ^(10).
+   The copying is done for cases where the number / formula / exponent is in math-mode, but the corresponding unit is in the
+   following text, i.e. $ x = 4 $ cm $^2$ ~> $x = 4$ 4 cm^2 $^2$. Like this, the unit expression can be detected by a regex
+   (cmp. evaluate_text). */
 pub fn pre_process(opt_node : Option<Node>, start : bool, status : String){
     if opt_node.is_none(){
         return;
@@ -219,6 +229,7 @@ pub fn resolve_times(leafs : &mut Vec<Node>) -> &[Node]{
 
 }
 
+/* Attaches the prefix to the textual content of the node */
 pub fn prefix_node_content(opt_node : Option<Node>, prefix : &str){
     if opt_node.is_none(){
         return;
@@ -231,7 +242,7 @@ pub fn prefix_node_content(opt_node : Option<Node>, prefix : &str){
 
 }
 
-//return the base and the exponent of a msup node
+/* Returns the base and the exponent of a msup node */
 pub fn msup_base_exp(msup_node : Node) -> Option<(String, String)> {
     if msup_node.get_first_child().is_none() {
         return None;
@@ -266,6 +277,7 @@ pub fn msup_base_exp(msup_node : Node) -> Option<(String, String)> {
 }
 
 
+/* Calculates the value of an msup node, if both children are numbers, i.e. 10^(-1) ~> 0.1 */
 pub fn calculate_msup(msup_node : Node) -> Option<String> {
     let base_exp = msup_base_exp(msup_node);
     if base_exp.is_none(){
@@ -283,7 +295,8 @@ pub fn calculate_msup(msup_node : Node) -> Option<String> {
     return Some(base.unwrap().powf(exp.unwrap()).to_string());
 }
 
-
+/* Prints the nodes of the document in an user-friendly format with
+    indents for the depth of the node */
 pub fn print_document(opt_node : Option<Node>, space : String){
     if opt_node.is_none(){
         return;
@@ -302,10 +315,20 @@ pub fn print_document(opt_node : Option<Node>, space : String){
 
 }
 
+/* Returns a regex matching numbers (with "."), i.e. 0.123 */
 pub fn get_number_regex_string() -> String{
     return r"\d*\.?\d+".to_string();
 }
 
+
+/* Returns a regex matching i.e. " 5 MHz.", where the match consists of
+    - a whitespace
+    - a number
+    - whitespaces
+    - an optional prefix
+    - the unit symbol
+    - a symbol for the end (whitespace . ) ,)
+  */
 pub fn get_number_prefix_unit_regexp() -> Regex{
     let mut prefix_regex : String = r"".to_string();
     let mut unit_regex : String = r"".to_string();
@@ -325,6 +348,14 @@ pub fn get_number_prefix_unit_regexp() -> Regex{
     combined_regex
 }
 
+/* Returns a regex matching i.e. " 5 MHz - 10 MHz", where the match consists of
+    - a number
+    - a range symbol (- or 'to')
+    - another number
+    - an optional prefix
+    - the unit symbol
+    - a symbol for the end (whitespace . ) ,)
+  */
 pub fn get_range_regexp() -> Regex{
     let number : String = r"-?\d*\.?\d+".to_string();
 
@@ -347,7 +378,11 @@ pub fn get_range_regexp() -> Regex{
 }
 
 
-
+/*
+    Looks at the plaintext of the document (modified by pre_process), where "MathFormula" is deleted from the text
+    and power expressions (10^10) are replaced by their result.
+    After that, it is looking for quantity expressions and range expressions using regular expressions and prints them.
+*/
 pub fn evaluate_text(document : &mut Document, status : String){
     for sentence in document.sentence_iter(){
         let ref old_text = sentence.range.dnm.plaintext;
@@ -415,6 +450,12 @@ pub fn evaluate_text(document : &mut Document, status : String){
     }
 }
 
+/*
+    Searches for the patterns listed below in the leafs of a math node. If a pattern is found, then the
+    corresponding evaluation-function of that pattern is called on the text found, to verify that the
+    text is also as expected.
+    Also searches for degree-expressions in math-nodes.
+*/
 pub fn evaluate_math(leafs : Vec<Node>) {
         for leaf in leafs.clone(){
             if DEBUG {
@@ -440,60 +481,14 @@ pub fn evaluate_math(leafs : Vec<Node>) {
         }
 }
 
-
 /*
-pub fn evaluate_math(document : &mut Document) {
-    let ref context = document.xpath_context;
+    Returns the "leafs" of a math tree (well, not quite, but almost), i.e.
+    mo, mi, mn and mtext nodes.
+    For msup-nodes it returns either the result of the power operations if possible, else the whole node.
+    For msub-nodes it returns the first child with the content of the second one attached i.e. M_s.
 
-    let res = context.evaluate("//math");
-
-    create_kat_annotations_header();
-
-    if res.is_err(){
-        return;
-    }
-
-    let res_vec : Vec<Node> = match res{
-        Ok(object) => object.get_nodes_as_vec(),
-        Err (_) => Vec::new(),
-    };
-
-    for node in res_vec{
-
-        let mut leafs = Vec::new();
-        leafs = leafs_of_math_tree(Some(node.clone()), leafs);
-
-
-        for leaf in leafs.clone(){
-            if DEBUG {
-                println!("{} {}", leaf.get_name(), leaf.get_all_content());
-            }
-        }
-
-        let pattern1 : [&str; 3] = ["mn","mo","mtext"];
-        let pattern2 : [&str; 5] = ["mn", "mo", "mi", "mo", "mtext"];
-        let pattern3 : [&str; 11] = ["mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi"];
-        let pattern4 : [&str; 12] = ["mn", "mo", "mn", "mo", "mi", "mo", "mi", "mo", "mi", "mo", "mi", "mo"];
-
-        pattern_spotter_leafs(&leafs, &pattern1, &mut Vec::new(), check_result_pattern1);
-        pattern_spotter_leafs(&leafs, &pattern2, &mut Vec::new(), check_result_pattern2);
-        pattern_spotter_leafs(&leafs, &pattern3, &mut Vec::new(), check_result_pattern3);
-        pattern_spotter_leafs(&leafs, &pattern4, &mut Vec::new(), check_result_pattern4);
-
-        find_degree(&leafs);
-
-
-        if DEBUG {
-            println!("");
-        }
-    }
-
-
-    end_kat_document();
-
-}
+    mrow, mpadded, semantics and mstyle nodes are not returned.
 */
-
 pub fn leafs_of_math_tree (opt_node : Option<Node>, mut res : Vec<Node>) -> Vec<Node>{
     if opt_node.is_none(){
         return res;
@@ -552,6 +547,12 @@ pub fn leafs_of_math_tree (opt_node : Option<Node>, mut res : Vec<Node>) -> Vec<
 }
 
 
+/*
+    Called by evaluate_math.
+    Matches the pattern given as an argument with the leafs also given as an argument.
+    Calls the verify-function if either the pattern is complete or there are no more leafs.
+    It stores matches as PossQEs with possible exponents stored in the PossQEs as well.
+*/
 pub fn pattern_spotter_leafs <'a> (leafs : &'a[Node], pattern : &'a[&str], res : &mut Vec<PossQE>,
                               func : fn(vec : &Vec<PossQE>) -> ())
 {
@@ -571,28 +572,15 @@ pub fn pattern_spotter_leafs <'a> (leafs : &'a[Node], pattern : &'a[&str], res :
 
     //search for an exponent
     if leafs[0].get_first_child().is_some() && leafs[0].get_name().eq("msup") {
-        if leafs[0].get_first_child().is_none() {
-            return;
-        }
-        if leafs[0].get_first_child().unwrap().get_next_sibling().is_none() {
-            return;
-        }
-        let child1 = &leafs[0].get_first_child().unwrap();
-        let child2 = child1.get_next_sibling().unwrap();
-
-        if child2.get_name().eq("mn"){
-            let poss_exp = child2.get_all_content().parse::<f64>();
+        let base_exp = msup_base_exp(leafs[0].clone());
+        if base_exp.is_none(){
+            println!("no proper sub-nodes in an msup node");
+        }else{
+            let poss_exp = base_exp.unwrap().parse::<f64>();
             if poss_exp.is_err(){
                 return;
             }
             exp = poss_exp.unwrap();
-
-
-        }else{
-            if DEBUG {
-                println!("unknown pattern found msup with no mn as second child");
-            }
-            return;
         }
         head = &life_time_prob;
     }else{
@@ -630,8 +618,9 @@ pub fn pattern_spotter_leafs <'a> (leafs : &'a[Node], pattern : &'a[&str], res :
 
 }
 
-
-
+/*
+    Builds a string from the content and the exponent of the PossQE-vec.
+*/
 pub fn poss_qe_to_string(vec : &[PossQE]) -> String{
     let mut string = String::from("");
     for poss_qe in vec{
@@ -644,6 +633,9 @@ pub fn poss_qe_to_string(vec : &[PossQE]) -> String{
 
 }
 
+/*
+    Checks that the content matching pattern1 is correct
+*/
 pub fn check_result_pattern1(vec : &Vec<PossQE>){
     let string = poss_qe_to_string(&vec);
 
@@ -666,6 +658,9 @@ pub fn check_result_pattern1(vec : &Vec<PossQE>){
 
 }
 
+/*
+    Checks that the content matching pattern2 is correct
+*/
 pub fn check_result_pattern2(vec : &Vec<PossQE>) {
 
     let string = poss_qe_to_string(&vec);
@@ -690,6 +685,9 @@ pub fn check_result_pattern2(vec : &Vec<PossQE>) {
 
 }
 
+/*
+    Checks that the content matching pattern3 is correct
+*/
 pub fn check_result_pattern3(vec : &Vec<PossQE>){
     let string = poss_qe_to_string(&vec);
 
@@ -720,6 +718,9 @@ pub fn check_result_pattern3(vec : &Vec<PossQE>){
 
 }
 
+/*
+    Checks that the content matching pattern4 is correct
+*/
 pub fn check_result_pattern4(vec : &Vec<PossQE>){
     let string = poss_qe_to_string(&vec);
 
@@ -762,7 +763,11 @@ pub fn check_result_pattern4(vec : &Vec<PossQE>){
 
 }
 
-
+/*
+    Searches for degree expressions in math-nodes, especially in msup nodes with
+    a number and a degree-symbol as children. Additionally searches for a following "C",
+    so for degree Celsius.
+*/
 pub fn find_degree (leafs : &[Node]){
     if leafs.len() == 0{
         return;
@@ -818,7 +823,7 @@ pub fn find_degree (leafs : &[Node]){
 
 }
 
-
+//TODO work in progress
 pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool {
 
     let mut parts : Vec<&[PossQE]> = Vec::new();
@@ -842,7 +847,9 @@ pub fn check_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> bool {
     return false;
 }
 
-
+/*
+    Decomposes a unit string to a prefix, an unit symbol and an exponent, if possible.
+*/
 pub fn check_single_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> Option<(String, String, f64)>{
 
     let mut unit = "";
@@ -893,20 +900,9 @@ pub fn check_single_unit_string(poss_unit : &str, vec : &Vec<PossQE>) -> Option<
 }
 
 
-pub fn next_sibling_is (old_node : Node, str : &str) -> bool {
-    let sibling = old_node.get_next_sibling();
-    match sibling{
-        Some(node) => {
-            if node.get_name().eq(str) {
-                return true;
-            }
-        },
-        None => return false,
-
-    }
-    false
-}
-
+/*
+    Creates the header of the KAT-document. This is still very much work in progress, still waiting for Tom's response
+*/
 pub fn create_kat_annotations_header(){
     let mut kat_string = String::new();
 
